@@ -1,0 +1,65 @@
+{
+  "name": "base-de-prix",
+  "version": "2.5.3",
+  "description": "Outil de gestion de base de prix et DPGF",
+  "main": "main.js",
+  "author": "Nathan RAMEDACE",
+  "license": "MIT",
+  "scripts": {
+    "start":   "electron .",
+    "build":   "electron-builder --win --x64",
+    "publish": "electron-builder --win --x64 --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.baseprix.app",
+    "productName": "Base de Prix",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "icon.png"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "DustProgram",
+        "repo": "base-de-prix",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "nsis-web", "arch": ["x64"] }
+      ],
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Base de Prix",
+      "artifactName": "Base-de-Prix-Setup-${version}.${ext}"
+    },
+    "nsisWeb": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Base de Prix",
+      "appPackageUrl": "https://github.com/DustProgram/base-de-prix/releases/download/v${version}/",
+      "artifactName": "Base-de-Prix-Web-Setup-${version}.${ext}"
+    }
+  }
+}
