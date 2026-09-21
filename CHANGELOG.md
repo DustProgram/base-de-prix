@@ -1,4 +1,48 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.5.3
+# 📋 Base de Prix — Évolutions v2.3 → v2.6.0
+
+## 🚀 v2.6.0 — Import IA, Google Sheets collaboratif, ratios par type d'ouvrage
+
+### 🤖 Import IA (PDF / Excel → base de prix)
+
+Nouveau module **Import IA** (sidebar → Outils) : déposez vos offres de chantier,
+devis ou DPGF chiffrées (PDF, y compris scannés, ou Excel), l'API Claude
+(`claude-opus-5`) en extrait les prix unitaires HT avec projet, date, unité,
+et propose un lot et un repère (similarité avec la base existante).
+
+- File d'attente multi-fichiers, traitement séquentiel, pause/reprise, coût estimé affiché par fichier
+- **Écran de validation obligatoire** avant import : ⚠️ prix anormal vs historique, ♻️ doublon probable, 🔻 confiance faible, édition par double-clic
+- Les Excel sont convertis en texte localement (SheetJS) pour réduire le coût API
+- Clé API saisie dans Paramètres, **stockée chiffrée** (safeStorage/DPAPI), jamais exposée au renderer
+- Glisser-déposer de PDF depuis n'importe quelle page
+
+### 🟩 Liaison Google Sheets (base maître collaborative)
+
+Alternative à la liaison Excel/NAS : une **feuille Google Sheets partagée** devient
+la base maître, éditable par plusieurs utilisateurs en même temps.
+
+- Connexion « Se connecter avec Google » (OAuth 2.0 application de bureau, PKCE, jetons chiffrés localement)
+- Onglet `BASE_PRIX` créé automatiquement avec en-têtes ; chaque ligne porte un **ID stable**, l'auteur et la date de modification
+- **Sync ligne à ligne** (append/update/delete ciblés) au lieu du remplacement de fichier entier : fini les écrasements croisés
+- Fusion à 3 sources (local / feuille / dernier état connu) : les modifs des collègues sont adoptées, les vôtres poussées, les conflits résolus en faveur du local avec avertissement
+- Vérification des modifications externes toutes les 60 s, mode hors-ligne, compteur de modifs en attente dans le bandeau, protection à la fermeture
+- La liaison Excel classique reste disponible (mais exclusive : Excel OU Sheets)
+
+### 🧩 Ratios par type d'ouvrage + tri multi-niveaux
+
+- Page Ratios : nouveau bouton **« Par type d'ouvrage »** — les prix aux désignations
+  similaires (même lot, même unité) sont regroupés automatiquement par similarité
+  textuelle, même avec des repères ou chantiers différents ; moyenne/min/max/médiane/dernier
+  calculés sur le groupe, détail par chantier et par date au clic
+- Page Base : bouton **« Lot › Date › Chantier »** pour trier par lot, puis date (récent d'abord), puis chantier
+
+### 🔧 Technique
+
+- Chaque prix porte désormais un identifiant stable `id` (migration automatique, transparente)
+- Nouveaux modules : `lib/` (processus principal : secrets, API Claude, Google Sheets) et `renderer/`
+- Dépendances : `@anthropic-ai/sdk`, `zod`
+
+---
+
 
 **Date de livraison :** 28 avril 2026
 **Version actuelle :** 2.5.3

@@ -1,8 +1,11 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron')
 const path   = require('path')
 const fs     = require('fs')
 const crypto = require('crypto')
 const { autoUpdater } = require('electron-updater')
+const { createSecretStore } = require('./lib/secrets')
+const { extractPrices } = require('./lib/claude')
+const { createGSheets } = require('./lib/gsheets')
 
 let win
 let allowQuit = false
@@ -308,3 +311,89 @@ ipcMain.handle('check-for-updates', async () => {
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())
+
+/* ============================================================
+   ★ v2.6 ★ SECRETS (clé API Claude, identifiants Google)
+   Stockés chiffrés via safeStorage. Le renderer peut écrire un
+   secret et savoir s'il existe, jamais le relire.
+   ============================================================ */
+const secrets = createSecretStore(app, safeStorage)
+
+ipcMain.handle('secret-set', async (e, { name, value }) => {
+  try {
+    if (!secrets.isAllowed(name)) return { success: false, error: 'Secret non autorisé' }
+    secrets.set(name, value)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('secret-has', async (e, name) => {
+  try { return secrets.isAllowed(name) && secrets.has(name) } catch (err) { return false }
+})
+
+/* ============================================================
+   ★ v2.6 ★ IMPORT IA — extraction de prix via l'API Claude
+   ============================================================ */
+ipcMain.handle('open-files', async (e, filters) => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choisir des fichiers',
+    filters: filters || [{ name: 'Documents', extensions: ['pdf', 'xlsx', 'xlsm', 'xls', 'csv'] }],
+    properties: ['openFile', 'multiSelections']
+  })
+  restoreFocus()
+  if (result.canceled || !result.filePaths.length) return []
+  return result.filePaths
+})
+
+ipcMain.handle('ia-extract', async (e, { kind, filePath, base64, text, filename, lots, hints }) => {
+  try {
+    const apiKey = secrets.get('anthropic_api_key')
+    if (!apiKey) return { ok: false, error: 'Aucune clé API Claude enregistrée. Paramètres → Import IA.' }
+    if (kind === 'pdf' && filePath && !base64) {
+      if (!fs.existsSync(filePath)) return { ok: false, error: 'Fichier introuvable : ' + filePath }
+      base64 = fs.readFileSync(filePath).toString('base64')
+    }
+    return await extractPrices({ apiKey, kind, base64, text, filename, lots, hints })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+/* ============================================================
+   ★ v2.6 ★ GOOGLE SHEETS — OAuth + API
+   ============================================================ */
+const gsheets = createGSheets({ secrets, shell })
+
+function gsHandle(channel, fn) {
+  ipcMain.handle(channel, async (e, args) => {
+    try {
+      const data = await fn(args || {})
+      return { ok: true, ...(data !== undefined ? { data } : {}) }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  })
+}
+
+gsHandle('gs-auth-start',  ()   => gsheets.startAuth())
+gsHandle('gs-auth-status', ()   => gsheets.authStatus())
+gsHandle('gs-auth-logout', ()   => { gsheets.logout() })
+gsHandle('gs-meta',        (a)  => gsheets.getMeta(a.spreadsheetId))
+gsHandle('gs-ensure',      (a)  => gsheets.ensureSheet(a.spreadsheetId, a.title, a.header))
+gsHandle('gs-read',        (a)  => gsheets.readAll(a.spreadsheetId, a.title))
+gsHandle('gs-append',      (a)  => gsheets.appendRows(a.spreadsheetId, a.title, a.rows))
+gsHandle('gs-update',      (a)  => gsheets.updateRows(a.spreadsheetId, a.title, a.updates))
+gsHandle('gs-delete-rows', (a)  => gsheets.deleteRows(a.spreadsheetId, a.sheetId, a.rowNumbers))
+
+// Ouvrir une URL https dans le navigateur (feuille Google, console API…)
+ipcMain.handle('open-url', async (e, url) => {
+  try {
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return { success: false, error: 'URL non autorisée' }
+    await shell.openExternal(url)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})

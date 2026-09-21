@@ -342,6 +342,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   <div>Déposez votre fichier ici</div>
   <div style="font-size:14px;font-weight:400;opacity:.85">
     .xlsx / .xlsm pour lier ou importer une DPGF<br>
+    .pdf pour l'import IA (extraction automatique des prix)<br>
     .json pour restaurer une sauvegarde
   </div>
 </div>
@@ -396,7 +397,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
     <button class="btn-icon" id="btnDarkMode" title="Mode sombre (Ctrl+D)" onclick="setDarkMode(!PREFS.darkMode)">🌗</button>
     <button class="btn-icon" id="btnHelp" title="Raccourcis clavier (F1)" onclick="openModal('modalHelp')">❓</button>
     <span style="width:1px;height:22px;background:rgba(255,255,255,.18);margin:0 4px"></span>
-    <button class="btn btn-gris" id="btnLinkMain" style="font-size:10px">🔗 Lier fichier Excel</button>
+    <button class="btn btn-gris" id="btnLinkMain" style="font-size:10px">🔗 Lier Excel / Sheets</button>
     <button class="kebab-btn" id="btnKebab" title="Plus d'options">⋮</button>
     <button class="btn btn-orange" id="btnExportStandalone" style="font-size:10px"
             title="Exporter un fichier Excel formaté (utile sans liaison)">⬇ Export</button>
@@ -435,6 +436,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   <div class="sb-sep">Lots</div>
   <div id="sbLots"></div>
   <div class="sb-sep" style="margin-top:8px">Outils</div>
+  <div class="sb-item" data-page="importia">🤖 Import IA <span class="sb-count" id="sbCntIA"></span></div>
   <div class="sb-item" data-page="historique">📜 Historique</div>
   <div class="sb-item" data-page="params">⚙️ Paramètres</div>
 </div>
@@ -503,6 +505,8 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <select id="filterLot" onchange="renderBase()"><option value="">Tous les lots</option></select>
       <select id="filterProj" onchange="renderBase()"><option value="">Tous les projets</option></select>
       <select id="filterAnnee" onchange="renderBase()"><option value="">Toutes années</option></select>
+      <button class="btn btn-gris" title="Trier par lot, puis date (récent d'abord), puis chantier"
+              onclick="baseSortCol='__multi';baseSortDir=1;renderBase()">📑 Lot › Date › Chantier</button>
       <button class="btn btn-vert" onclick="openAjout()">+ Ajouter un prix</button>
     </div>
     <div class="tbl-wrap"><table id="tblBase"></table></div>
@@ -594,21 +598,83 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 <div id="page-ratios" class="page">
   <div class="card">
     <div class="card-title">
-      <span>📊 Ratios par repère interne</span>
-      <span style="display:flex;gap:6px">
+      <span id="ratiosTitle">📊 Ratios par repère interne</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <div class="dpgf-mode-toggle" id="ratioViewToggle">
+          <button class="on" data-rview="repere" onclick="setRatioView('repere')">🏷 Par repère</button>
+          <button data-rview="types" onclick="setRatioView('types')">🧩 Par type d'ouvrage</button>
+        </div>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="expandAllRatios()">↕ Tout déployer</button>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="collapseAllRatios()">↔ Tout replier</button>
       </span>
     </div>
-    <div class="info info-bleu">
+    <div class="info info-bleu" id="ratiosHelpRepere">
       Pour chaque repère interne, l'application calcule la moyenne (ratio), le min, max
       et le dernier prix observé. <strong>Cliquez sur une ligne</strong> pour voir le détail des prix.
+    </div>
+    <div class="info info-bleu" id="ratiosHelpTypes" style="display:none">
+      ★ v2.6 — Les <strong>ouvrages du même type</strong> (désignations similaires, même lot et même unité)
+      sont regroupés automatiquement par similarité textuelle, même s'ils portent des repères différents
+      ou viennent de chantiers différents. La moyenne est calculée sur tout le groupe.
+      <strong>Cliquez sur une ligne</strong> pour voir le détail par chantier et par date.
     </div>
     <div class="srch-row">
       <input type="text" id="searchRatio" placeholder="🔍 Filtrer..." oninput="renderRatios()">
       <select id="filterRatioLot" onchange="renderRatios()"><option value="">Tous les lots</option></select>
     </div>
     <div class="tbl-wrap"><table id="tblRatios"></table></div>
+  </div>
+</div>
+
+<!-- ─── ★ v2.6 : Import IA ─── -->
+<div id="page-importia" class="page">
+  <div class="card">
+    <div class="card-title">🤖 Import IA — Extraction automatique de prix (PDF / Excel)</div>
+    <div class="info info-bleu">
+      Déposez vos <strong>offres de chantier, devis, DPGF chiffrées</strong> (PDF ou Excel) :
+      l'IA (API Claude) lit chaque document, en extrait les <strong>prix unitaires HT</strong>,
+      identifie le chantier, la date et propose un lot. <strong>Rien n'entre dans la base sans
+      votre validation</strong> dans le tableau ci-dessous.
+    </div>
+    <div class="info info-orange" id="iaKeyWarning" style="display:none">
+      ⚠️ Aucune clé API Claude enregistrée. Allez dans <strong>Paramètres → 🤖 Import IA</strong>
+      pour la saisir (créez-la sur <code>console.anthropic.com</code>).
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-bleu" onclick="iaChooseFiles()">📂 Choisir des fichiers (PDF / Excel)</button>
+      <button class="btn btn-orange" id="iaBtnPause" onclick="iaTogglePause()" style="display:none">⏸ Mettre en pause</button>
+      <button class="btn btn-rouge" onclick="iaClearQueue()">🗑 Vider la file</button>
+      <span style="flex:1"></span>
+      <span id="iaTotalCost" style="font-size:10px;color:#888;align-self:center"></span>
+    </div>
+    <div class="help-text" style="margin-top:8px">
+      💡 Les fichiers sont traités un par un (comptez ~30 s à 2 min par document).
+      Vous pouvez aussi glisser-déposer des PDF n'importe où dans l'application.
+      Coût indicatif : quelques centimes à ~0,50 $ par document selon sa taille.
+    </div>
+    <div class="tbl-wrap" id="iaQueueWrap" style="margin-top:10px;display:none">
+      <table id="tblIaQueue"></table>
+    </div>
+  </div>
+
+  <div class="card" id="iaResultCard" style="display:none">
+    <div class="card-title">
+      <span>✅ Lignes extraites — à valider <span id="iaRowsCount" style="font-weight:400;color:#888;font-size:11px"></span></span>
+    </div>
+    <div class="info info-orange" style="font-size:11px">
+      Relisez avant d'importer : <strong>⚠️ = prix anormal</strong> vs l'historique du repère ·
+      <strong>♻️ = doublon probable</strong> (déjà en base) · <strong>🔻 = confiance faible</strong> de l'IA.
+      Double-cliquez sur une cellule pour corriger. Les repères proposés <em>~</em> viennent de la similarité avec votre base.
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-gris" style="font-size:10px" onclick="iaCheckAll(true)">☑ Tout cocher</button>
+      <button class="btn btn-gris" style="font-size:10px" onclick="iaCheckAll(false)">☐ Tout décocher</button>
+      <button class="btn btn-orange" style="font-size:10px" onclick="iaUncheckDoublons()">♻️ Décocher les doublons</button>
+      <button class="btn btn-rouge" style="font-size:10px" onclick="iaClearRows()">🗑 Tout effacer</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-vert" onclick="iaValiderImport()">✅ Importer les lignes cochées dans la base</button>
+    </div>
+    <div class="tbl-wrap" style="margin-top:8px"><table id="tblIaRows"></table></div>
   </div>
 </div>
 
@@ -701,6 +767,60 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
           Créer une sauvegarde automatique avant chaque opération importante
         </label>
       </div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🤖 Import IA (API Claude)
+      </label>
+      <div class="help-text" style="margin-bottom:8px">
+        La clé est stockée <strong>chiffrée sur cet ordinateur</strong> (elle ne peut pas être relue depuis l'interface).
+        Créez-la sur <a href="#" onclick="event.preventDefault();openExternalUrl('https://console.anthropic.com/settings/keys')">console.anthropic.com</a>.
+        Modèle utilisé : <code>claude-opus-5</code>.
+      </div>
+      <div class="form-grid">
+        <div>
+          <label>Clé API Claude <span id="iaKeyStatus" style="font-weight:400"></span></label>
+          <input type="password" id="prefApiKey" placeholder="sk-ant-api03-..." autocomplete="off">
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px">
+          <button class="btn btn-vert" onclick="saveApiKey()">💾 Enregistrer la clé</button>
+          <button class="btn btn-rouge" onclick="deleteApiKey()">🗑 Supprimer</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🟩 Google Sheets (base collaborative)
+      </label>
+      <div id="gsAccountZone" style="margin-bottom:10px"></div>
+      <details style="font-size:11px;margin-bottom:10px">
+        <summary style="cursor:pointer;color:var(--bleu);font-weight:600">⚙️ Configuration initiale (une seule fois) — obtenir un Client ID Google</summary>
+        <ol style="margin:8px 0 8px 18px;line-height:1.7;color:#555">
+          <li>Ouvrez <a href="#" onclick="event.preventDefault();openExternalUrl('https://console.cloud.google.com/')">console.cloud.google.com</a> et créez un projet (gratuit).</li>
+          <li>Menu « API et services » → « Bibliothèque » → activez <strong>Google Sheets API</strong>.</li>
+          <li>« Écran de consentement OAuth » : type <em>Externe</em>, ajoutez les comptes de l'entreprise comme utilisateurs test.</li>
+          <li>« Identifiants » → « Créer des identifiants » → <strong>ID client OAuth</strong> → type <strong>Application de bureau</strong>.</li>
+          <li>Copiez le Client ID et le Client Secret ci-dessous, puis cliquez sur « Se connecter avec Google ».</li>
+        </ol>
+      </details>
+      <div class="form-grid">
+        <div>
+          <label>Client ID <span id="gsClientIdStatus" style="font-weight:400"></span></label>
+          <input type="text" id="prefGsClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+        </div>
+        <div>
+          <label>Client Secret</label>
+          <input type="password" id="prefGsClientSecret" placeholder="GOCSPX-..." autocomplete="off">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-vert" onclick="gsSaveCreds()">💾 Enregistrer les identifiants</button>
+        <button class="btn btn-bleu" id="btnGsConnect" onclick="gsConnect()">🔐 Se connecter avec Google</button>
+        <button class="btn btn-rouge" id="btnGsLogout" onclick="gsLogout()" style="display:none">🚪 Se déconnecter</button>
+      </div>
+      <div id="gsLinkZone" style="margin-top:10px"></div>
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
@@ -1155,6 +1275,60 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   </div>
 </div>
 
+<!-- ★ v2.6 : Choix du type de liaison -->
+<div class="modal-bg" id="modalLinkType" data-modal="linktype">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">🔗 Lier une base de prix</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <label style="display:flex;gap:10px;padding:12px;border:2px solid var(--bord);border-radius:8px;cursor:pointer"
+             onclick="closeModal('modalLinkType');linkExcel()">
+        <span style="font-size:22px">📊</span>
+        <div style="flex:1">
+          <strong style="font-size:13px;color:var(--bleu)">Fichier Excel (local / NAS)</strong>
+          <div style="font-size:11px;color:#666;margin-top:3px">
+            Liaison classique avec un classeur .xlsx/.xlsm. Sync fichier entier, détection de conflit par hash.
+          </div>
+        </div>
+      </label>
+      <label style="display:flex;gap:10px;padding:12px;border:2px solid var(--bord);border-radius:8px;cursor:pointer"
+             onclick="closeModal('modalLinkType');openGsLinkModal()">
+        <span style="font-size:22px">🟩</span>
+        <div style="flex:1">
+          <strong style="font-size:13px;color:#188038">Google Sheets (collaboratif) — recommandé</strong>
+          <div style="font-size:11px;color:#666;margin-top:3px">
+            Feuille partagée en ligne, plusieurs utilisateurs en même temps, sync ligne à ligne,
+            chaque modification signée par son auteur. Nécessite une connexion Google (Paramètres).
+          </div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalLinkType')">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6 : Liaison Google Sheets -->
+<div class="modal-bg" id="modalGsLink" data-modal="gslink">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-title">🟩 Lier une feuille Google Sheets</div>
+    <div class="info info-bleu" id="gsLinkInfo">
+      Collez l'URL de la feuille Google Sheets qui servira de <strong>base maître partagée</strong>.
+      Un onglet <code>BASE_PRIX</code> y sera créé s'il n'existe pas. Tous les collaborateurs
+      doivent avoir accès en écriture à cette feuille (bouton « Partager » dans Google Sheets).
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700">URL de la feuille</label>
+      <input type="text" id="gsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/XXXXXXXX/edit">
+    </div>
+    <div class="info info-orange" id="gsLinkWarning" style="display:none;margin-top:8px"></div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalGsLink')">Annuler</button>
+      <button class="btn btn-vert" id="btnGsLinkConfirm" onclick="gsConfirmLink()">✅ Lier cette feuille</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div id="toast"></div>
 
@@ -1162,7 +1336,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.5.3';
+const APP_VERSION = '2.6.0';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1244,7 +1418,18 @@ let syncDebounce    = null;
 /* ============================================================
    UTILITAIRES
    ============================================================ */
+/* ★ v2.6 — identifiant stable par prix (nécessaire à la sync Google Sheets ligne à ligne) */
+function genId() {
+  return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
+}
+function ensureIds() {
+  let changed = false;
+  BASE.forEach(r => { if (!r.id) { r.id = genId(); changed = true; } });
+  return changed;
+}
+
 function save(skipSync) {
+  ensureIds();
   localStorage.setItem('bp', JSON.stringify(BASE));
   // Nettoyer les exclusions orphelines (prix qui n'existent plus dans BASE)
   let prefsChanged = false;
@@ -1554,6 +1739,7 @@ function showPage(p){
   if (p==='dpgf')      renderDPGF();
   if (p==='params')    renderParams();
   if (p==='historique')renderHistorique();
+  if (p==='importia' && typeof renderImportIA==='function') renderImportIA();
 }
 function showLot(lot){
   showPage('base');
@@ -1646,7 +1832,13 @@ function renderBase(){
             || (r.projet||'').toLowerCase().includes(srch)));
 
   // Tri
-  if (baseSortCol) {
+  if (baseSortCol === '__multi') {
+    // ★ v2.6 — tri groupé Lot (ordre des lots) › Date (récent d'abord) › Chantier
+    d.sort((a,b) =>
+      (lotIdx(a.lot) - lotIdx(b.lot)) ||
+      String(b.date||'').localeCompare(String(a.date||'')) ||
+      String(a.projet||'').localeCompare(String(b.projet||'')));
+  } else if (baseSortCol) {
     d.sort((a,b) => {
       let va = a[baseSortCol], vb = b[baseSortCol];
       if (typeof va === 'number' && typeof vb === 'number') return (va-vb)*baseSortDir;
@@ -2540,6 +2732,8 @@ async function importerTrameMasse() {
    ★ v2.4 ★ RATIOS — avec lignes expansibles + sparkline
    ============================================================ */
 function renderRatios(){
+  // ★ v2.6 — vue "par type d'ouvrage" (regroupement par similarité) : voir renderer/ratios-plus.js
+  if (window.RATIO_VIEW === 'types' && typeof renderRatiosTypes === 'function') { renderRatiosTypes(); return; }
   const grouped = {};
   BASE.forEach(r => {
     if (!grouped[r.repere]) grouped[r.repere] = {
@@ -2973,6 +3167,8 @@ async function relinkExcel() {
    ★ v2.3 ★ SYNC AVEC DÉTECTION DE CONFLIT
    ============================================================ */
 function scheduleSync(){
+  // ★ v2.6 — liaison Google Sheets : sync ligne à ligne dédiée
+  if (typeof gsScheduleSync === 'function') gsScheduleSync();
   if (!linkedExcelPath || !PREFS.autoSync) return;
   // Debounce pour éviter les sync en rafale
   clearTimeout(syncDebounce);
@@ -4533,14 +4729,19 @@ async function checkUpdatesNow() {
 function setupQuitHandler() {
   if (!isElectron || !window.electronAPI.onBeforeQuit) return;
   window.electronAPI.onBeforeQuit(() => {
+    // ★ v2.6 — modifs Google Sheets non poussées ?
+    const gsPending = (typeof gsCountPending === 'function') ? gsCountPending() : 0;
     // Si pas de modifs non syncées, on ferme directement
-    if (!linkedExcelPath || dirtyChanges.length === 0) {
+    if ((!linkedExcelPath || dirtyChanges.length === 0) && gsPending === 0) {
       window.electronAPI.confirmQuit();
       return;
     }
     // Sinon ouvrir la modale
-    $('quitMsg').innerHTML = `Vous avez des modifications non synchronisées avec le fichier officiel.<br>
-      <code style="font-size:10px;color:#666">${esc(linkedExcelPath.split(/[\\\/]/).pop())}</code>`;
+    const target = gsPending > 0 && (typeof GS !== 'undefined') && GS
+      ? `Feuille Google Sheets « ${GS.spreadsheetTitle || ''} »`
+      : (linkedExcelPath || '').split(/[\\\/]/).pop();
+    $('quitMsg').innerHTML = `Vous avez des modifications non synchronisées.<br>
+      <code style="font-size:10px;color:#666">${esc(target)}</code>`;
     document.querySelector('input[name="quitChoice"][value="sync"]').checked = true;
     openModal('modalQuit');
   });
@@ -4553,7 +4754,8 @@ async function confirmQuitChoice() {
   if (choice === 'sync') {
     toast('🔄 Synchronisation en cours...', 'bleu', 2000);
     try {
-      await syncToExcel(true);
+      // ★ v2.6 — forceSync route vers Google Sheets ou Excel selon la liaison
+      await forceSync();
     } catch (e) { console.error(e); }
   }
   // Fermer (avec ou sans sync)
@@ -4585,6 +4787,16 @@ function setupDragDrop() {
     dragCount = 0;
     $('dropOverlay').classList.remove('show');
     if (!e.dataTransfer.files.length) return;
+    // ★ v2.6 — routage Import IA : les PDF vont toujours à l'import IA ;
+    // si la page Import IA est active, les Excel/CSV déposés y vont aussi.
+    const allFiles = [...e.dataTransfer.files];
+    const iaPageActive = $('page-importia') && $('page-importia').classList.contains('active');
+    const iaFiles = allFiles.filter(f => /\.pdf$/i.test(f.name) ||
+      (iaPageActive && /\.(xlsx|xlsm|xls|csv)$/i.test(f.name)));
+    if (iaFiles.length && typeof iaAddDroppedFiles === 'function') {
+      iaAddDroppedFiles(iaFiles);
+      return;
+    }
     const file = e.dataTransfer.files[0];
     const name = file.name.toLowerCase();
     if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
@@ -4740,7 +4952,9 @@ async function bootstrap() {
 
   // Kebab + boutons
   setupKebab();
-  $('btnLinkMain').addEventListener('click', linkExcel);
+  // ★ v2.6 — le bouton propose Excel OU Google Sheets
+  $('btnLinkMain').addEventListener('click', () =>
+    (typeof openLinkTypeChooser === 'function') ? openLinkTypeChooser() : linkExcel());
   $('btnExportStandalone').addEventListener('click', exportStandalone);
   $('fileDPGFBtn').addEventListener('click', loadDPGF);
 
@@ -4791,5 +5005,9 @@ async function bootstrap() {
 window.addEventListener('DOMContentLoaded', bootstrap);
 
 </script>
+<!-- ★ v2.6 — modules complémentaires (même portée globale que le script principal) -->
+<script src="renderer/import-ia.js"></script>
+<script src="renderer/gsheets-ui.js"></script>
+<script src="renderer/ratios-plus.js"></script>
 </body>
 </html>

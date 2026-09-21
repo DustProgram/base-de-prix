@@ -1,8 +1,8 @@
 # Base de Prix & DPGF
 
-Application Electron de gestion de base de prix BTP et de DPGF (Décomposition du Prix Global et Forfaitaire), avec liaison Excel bidirectionnelle, détection de conflits et auto-update.
+Application Electron de gestion de base de prix BTP et de DPGF (Décomposition du Prix Global et Forfaitaire), avec import IA de documents (PDF/Excel via l'API Claude), liaison Google Sheets collaborative ou Excel bidirectionnelle, détection de conflits et auto-update.
 
-**Version actuelle :** 2.5.0
+**Version actuelle :** 2.6.0
 **Auteur :** Nathan RAMEDACE
 
 ---
@@ -31,6 +31,16 @@ Une fois installée, l'application se met à jour automatiquement à chaque nouv
 - Suggestions intelligentes par similarité textuelle (Jaccard)
 - Association rapide des repères existants
 - Export Excel avec mise en forme
+
+### Import IA (v2.6)
+- Extraction automatique des prix unitaires depuis des PDF (y compris scannés) et Excel via l'API Claude
+- Écran de validation avant import : anomalies, doublons, confiance, édition inline
+- Clé API stockée chiffrée localement (safeStorage)
+
+### Liaison Google Sheets (v2.6)
+- Feuille partagée = base maître collaborative multi-utilisateurs
+- Connexion OAuth Google, sync ligne à ligne avec fusion à 3 sources
+- Auteur et date de modification tracés sur chaque ligne
 
 ### Synchronisation Excel
 - Liaison bidirectionnelle avec un fichier Excel maître
