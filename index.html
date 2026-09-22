@@ -342,6 +342,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   <div>Déposez votre fichier ici</div>
   <div style="font-size:14px;font-weight:400;opacity:.85">
     .xlsx / .xlsm pour lier ou importer une DPGF<br>
+    .pdf pour l'import IA (extraction automatique des prix)<br>
     .json pour restaurer une sauvegarde
   </div>
 </div>
@@ -396,7 +397,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
     <button class="btn-icon" id="btnDarkMode" title="Mode sombre (Ctrl+D)" onclick="setDarkMode(!PREFS.darkMode)">🌗</button>
     <button class="btn-icon" id="btnHelp" title="Raccourcis clavier (F1)" onclick="openModal('modalHelp')">❓</button>
     <span style="width:1px;height:22px;background:rgba(255,255,255,.18);margin:0 4px"></span>
-    <button class="btn btn-gris" id="btnLinkMain" style="font-size:10px">🔗 Lier fichier Excel</button>
+    <button class="btn btn-gris" id="btnLinkMain" style="font-size:10px">🔗 Lier Excel / Sheets</button>
     <button class="kebab-btn" id="btnKebab" title="Plus d'options">⋮</button>
     <button class="btn btn-orange" id="btnExportStandalone" style="font-size:10px"
             title="Exporter un fichier Excel formaté (utile sans liaison)">⬇ Export</button>
@@ -435,6 +436,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   <div class="sb-sep">Lots</div>
   <div id="sbLots"></div>
   <div class="sb-sep" style="margin-top:8px">Outils</div>
+  <div class="sb-item" data-page="importia">🤖 Import IA <span class="sb-count" id="sbCntIA"></span></div>
   <div class="sb-item" data-page="historique">📜 Historique</div>
   <div class="sb-item" data-page="params">⚙️ Paramètres</div>
 </div>
@@ -499,10 +501,20 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <span id="baseCount" style="font-weight:400;color:#888;font-size:11px"></span>
     </div>
     <div class="srch-row">
-      <input type="text" id="searchBase" placeholder="🔍 Rechercher..." oninput="renderBase()">
-      <select id="filterLot" onchange="renderBase()"><option value="">Tous les lots</option></select>
-      <select id="filterProj" onchange="renderBase()"><option value="">Tous les projets</option></select>
-      <select id="filterAnnee" onchange="renderBase()"><option value="">Toutes années</option></select>
+      <input type="text" id="searchBase" placeholder="🔍 Rechercher..." oninput="debouncedRenderBase()">
+      <select id="filterLot" onchange="resetAndRenderBase()"><option value="">Tous les lots</option></select>
+      <select id="filterType" onchange="resetAndRenderBase()" title="Type de prix">
+        <option value="">Tous types</option>
+        <option value="vente">💰 Vente</option>
+        <option value="debours">🧾 Débours</option>
+        <option value="nc">· Non défini</option>
+      </select>
+      <select id="filterProj" onchange="resetAndRenderBase()"><option value="">Tous les projets</option></select>
+      <select id="filterAnnee" onchange="resetAndRenderBase()"><option value="">Toutes années</option></select>
+      <button class="btn btn-gris" title="Trier par lot, puis date (récent d'abord), puis chantier"
+              onclick="baseSortCol='__multi';baseSortDir=1;renderBase()">📑 Lot › Date › Chantier</button>
+      <button class="btn btn-orange" title="Attribuer un type (Vente/Débours) à toutes les lignes actuellement filtrées"
+              onclick="openBulkType()">🏷 Typer le filtre</button>
       <button class="btn btn-vert" onclick="openAjout()">+ Ajouter un prix</button>
     </div>
     <div class="tbl-wrap"><table id="tblBase"></table></div>
@@ -522,15 +534,28 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
     <div class="btn-row">
       <button class="btn btn-bleu" id="fileDPGFBtn">📂 Charger DPGF (.xlsx, .xlsm)</button>
       <button class="btn btn-violet" onclick="associerTout()">🔗 Associer toutes les lignes</button>
+      <button class="btn btn-orange" onclick="openChiffrageIA()">⚡ Chiffrage rapide IA</button>
+      <button class="btn btn-gris" id="btnRapportIA" style="display:none" onclick="openModal('modalRapportIA')">📋 Rapport IA</button>
       <button class="btn btn-vert" onclick="exportDPGF()">⬇ Exporter DPGF complétée</button>
       <button class="btn btn-rouge" onclick="clearDPGF()">🗑 Vider</button>
+      <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Estimer avec :
+        <select id="dpgfTypeSel" onchange="setDpgfTypeFilter(this.value)" style="width:auto">
+          <option value="tous">Tous les prix</option>
+          <option value="vente">💰 Prix de vente</option>
+          <option value="debours">🧾 Prix débours</option>
+        </select>
+      </span>
     </div>
   </div>
 
   <div class="card hidden" id="dpgfCard">
     <div class="card-title">
       <span>Lignes DPGF <span id="dpgfStats"></span></span>
-      <span style="display:flex;align-items:center;gap:6px">
+      <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <select id="dpgfSheetSel" onchange="setDpgfSheetFilter(this.value)" style="width:auto;max-width:240px"
+                title="Afficher une seule feuille (lot) ou toutes"></select>
         <span style="font-size:10px;color:#888;font-weight:400">Affichage :</span>
         <div class="dpgf-mode-toggle" id="viewToggle">
           <button class="on" data-view="sections">📑 Par feuille</button>
@@ -563,6 +588,14 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <button class="btn btn-orange" onclick="appliquerProjet()">🏷 Appliquer projet/date à tout</button>
       <button class="btn btn-rouge" onclick="clearMasse()">🗑 Vider</button>
       <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Type :
+        <select id="masseTypeSel" style="width:auto" title="Type appliqué à toutes les lignes importées">
+          <option value="vente">💰 Vente</option>
+          <option value="debours">🧾 Débours</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </span>
       <button class="btn btn-vert" onclick="validerMasse()">✅ Importer dans la base</button>
     </div>
     <div class="btn-row" style="margin-top:8px;border-top:1px dashed #ccc;padding-top:10px">
@@ -594,21 +627,105 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 <div id="page-ratios" class="page">
   <div class="card">
     <div class="card-title">
-      <span>📊 Ratios par repère interne</span>
-      <span style="display:flex;gap:6px">
+      <span id="ratiosTitle">📊 Ratios par repère interne</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <div class="dpgf-mode-toggle" id="ratioViewToggle">
+          <button class="on" data-rview="repere" onclick="setRatioView('repere')">🏷 Par repère</button>
+          <button data-rview="types" onclick="setRatioView('types')">🧩 Auto par type</button>
+          <button data-rview="perso" onclick="setRatioView('perso')">🛠 Mes ratios</button>
+        </div>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="expandAllRatios()">↕ Tout déployer</button>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="collapseAllRatios()">↔ Tout replier</button>
       </span>
     </div>
-    <div class="info info-bleu">
+    <div class="info info-bleu" id="ratiosHelpRepere">
       Pour chaque repère interne, l'application calcule la moyenne (ratio), le min, max
       et le dernier prix observé. <strong>Cliquez sur une ligne</strong> pour voir le détail des prix.
+    </div>
+    <div class="info info-bleu" id="ratiosHelpTypes" style="display:none">
+      ★ v2.6 — Les <strong>ouvrages du même type</strong> (désignations similaires, même lot et même unité)
+      sont regroupés automatiquement par similarité textuelle, même s'ils portent des repères différents
+      ou viennent de chantiers différents. La moyenne est calculée sur tout le groupe.
+      <strong>Cliquez sur une ligne</strong> pour voir le détail par chantier et par date.
+    </div>
+    <div class="info info-bleu" id="ratiosHelpPerso" style="display:none">
+      ★ v2.6.1 — <strong>Vos propres ratios</strong> : définissez un nom, un lot, une unité et des
+      mots-clés de recherche automatique dans les désignations (optionnel), puis ajustez à la main
+      en excluant ou ajoutant des prix précis. Exemple : « Béton C30/37 CEM III » avec les mots-clés
+      <code>c30/37, cem iii</code>.
     </div>
     <div class="srch-row">
       <input type="text" id="searchRatio" placeholder="🔍 Filtrer..." oninput="renderRatios()">
       <select id="filterRatioLot" onchange="renderRatios()"><option value="">Tous les lots</option></select>
+      <select id="ratioTypeSel" onchange="setRatioTypeFilter(this.value)" title="Type de prix utilisé pour les ratios">
+        <option value="tous">Tous les prix</option>
+        <option value="vente">💰 Vente</option>
+        <option value="debours">🧾 Débours</option>
+      </select>
+      <button class="btn btn-vert" id="btnNewCustomRatio" style="display:none" onclick="openCustomRatioEdit(-1)">+ Créer un ratio</button>
     </div>
     <div class="tbl-wrap"><table id="tblRatios"></table></div>
+  </div>
+</div>
+
+<!-- ─── ★ v2.6 : Import IA ─── -->
+<div id="page-importia" class="page">
+  <div class="card">
+    <div class="card-title">🤖 Import IA — Extraction automatique de prix (PDF / Excel)</div>
+    <div class="info info-bleu">
+      Déposez vos <strong>offres de chantier, devis, DPGF chiffrées</strong> (PDF ou Excel) :
+      l'IA (API Claude) lit chaque document, en extrait les <strong>prix unitaires HT</strong>,
+      identifie le chantier, la date et propose un lot. <strong>Rien n'entre dans la base sans
+      votre validation</strong> dans le tableau ci-dessous.
+    </div>
+    <div class="info info-orange" id="iaKeyWarning" style="display:none">
+      ⚠️ Aucune clé API Claude enregistrée. Allez dans <strong>Paramètres → 🤖 Import IA</strong>
+      pour la saisir (créez-la sur <code>console.anthropic.com</code>).
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-bleu" onclick="iaChooseFiles()">📂 Choisir des fichiers (PDF / Excel)</button>
+      <button class="btn btn-orange" id="iaBtnPause" onclick="iaTogglePause()" style="display:none">⏸ Mettre en pause</button>
+      <button class="btn btn-rouge" onclick="iaClearQueue()">🗑 Vider la file</button>
+      <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Ces documents sont des prix :
+        <select id="iaTypeSel" style="width:auto" onchange="iaSetType(this.value)"
+                title="Type appliqué aux lignes importées (un devis sous-traitant = débours, une DPGF client = vente)">
+          <option value="debours">🧾 Débours (devis ST, chantier)</option>
+          <option value="vente">💰 Vente (DPGF client)</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </span>
+      <span id="iaTotalCost" style="font-size:10px;color:#888;align-self:center"></span>
+    </div>
+    <div class="help-text" style="margin-top:8px">
+      💡 Les fichiers sont traités un par un (comptez ~30 s à 2 min par document).
+      Vous pouvez aussi glisser-déposer des PDF n'importe où dans l'application.
+      Coût indicatif : quelques centimes à ~0,50 $ par document selon sa taille.
+    </div>
+    <div class="tbl-wrap" id="iaQueueWrap" style="margin-top:10px;display:none">
+      <table id="tblIaQueue"></table>
+    </div>
+  </div>
+
+  <div class="card" id="iaResultCard" style="display:none">
+    <div class="card-title">
+      <span>✅ Lignes extraites — à valider <span id="iaRowsCount" style="font-weight:400;color:#888;font-size:11px"></span></span>
+    </div>
+    <div class="info info-orange" style="font-size:11px">
+      Relisez avant d'importer : <strong>⚠️ = prix anormal</strong> vs l'historique du repère ·
+      <strong>♻️ = doublon probable</strong> (déjà en base) · <strong>🔻 = confiance faible</strong> de l'IA.
+      Double-cliquez sur une cellule pour corriger. Les repères proposés <em>~</em> viennent de la similarité avec votre base.
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-gris" style="font-size:10px" onclick="iaCheckAll(true)">☑ Tout cocher</button>
+      <button class="btn btn-gris" style="font-size:10px" onclick="iaCheckAll(false)">☐ Tout décocher</button>
+      <button class="btn btn-orange" style="font-size:10px" onclick="iaUncheckDoublons()">♻️ Décocher les doublons</button>
+      <button class="btn btn-rouge" style="font-size:10px" onclick="iaClearRows()">🗑 Tout effacer</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-vert" onclick="iaValiderImport()">✅ Importer les lignes cochées dans la base</button>
+    </div>
+    <div class="tbl-wrap" style="margin-top:8px"><table id="tblIaRows"></table></div>
   </div>
 </div>
 
@@ -705,6 +822,101 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 
     <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
       <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🤖 IA — extraction de documents & chiffrage rapide
+      </label>
+      <div class="help-text" style="margin-bottom:8px">
+        Les clés sont stockées <strong>chiffrées sur cet ordinateur</strong> (elles ne peuvent pas être relues depuis l'interface).
+        Une seule clé suffit : celle du fournisseur choisi. ⚠️ Mistral ne lit pas les PDF (Excel et chiffrage uniquement).
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:700">Fournisseur utilisé</label>
+        <select id="prefIaProvider" onchange="iaSetProvider(this.value)" style="width:auto;min-width:280px">
+          <option value="claude">Claude (Anthropic) · PDF ✅</option>
+          <option value="gemini">Gemini (Google) · PDF ✅</option>
+          <option value="mistral">Mistral · PDF ❌</option>
+        </select>
+      </div>
+      <details style="font-size:11px;margin-bottom:10px">
+        <summary style="cursor:pointer;color:var(--bleu);font-weight:600">⚙️ Modèles (avancé) — à changer si l'API signale un modèle indisponible</summary>
+        <div class="help-text" style="margin:6px 0">
+          Vide = modèle par défaut de l'app. Si un fournisseur répond « modèle indisponible / palier
+          d'abonnement », l'app <strong>bascule automatiquement</strong> sur le modèle suggéré et le mémorise ici.
+        </div>
+        <div class="form-grid">
+          <div><label>Modèle Claude</label>
+            <input type="text" id="prefModel_claude" placeholder="défaut : claude-opus-5" onchange="iaSetModel('claude', this.value)"></div>
+          <div><label>Modèle Gemini</label>
+            <input type="text" id="prefModel_gemini" placeholder="défaut : gemini-3.1-pro-preview" onchange="iaSetModel('gemini', this.value)"></div>
+          <div><label>Modèle Mistral</label>
+            <input type="text" id="prefModel_mistral" placeholder="défaut : mistral-large-latest" onchange="iaSetModel('mistral', this.value)"></div>
+        </div>
+      </details>
+      <div class="form-grid">
+        <div>
+          <label>Clé API Claude <span id="iaKeyStatus" style="font-weight:400"></span>
+            <a href="#" style="font-weight:400;font-size:10px" onclick="event.preventDefault();openExternalUrl('https://console.anthropic.com/settings/keys')">créer ↗</a></label>
+          <input type="password" id="prefApiKey" placeholder="sk-ant-api03-..." autocomplete="off">
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px">
+          <button class="btn btn-vert" onclick="saveApiKey()">💾 Enregistrer</button>
+          <button class="btn btn-rouge" onclick="deleteApiKey()">🗑</button>
+        </div>
+        <div>
+          <label>Clé API Gemini <span id="geminiKeyStatus" style="font-weight:400"></span>
+            <a href="#" style="font-weight:400;font-size:10px" onclick="event.preventDefault();openExternalUrl('https://aistudio.google.com/apikey')">créer ↗</a></label>
+          <input type="password" id="prefGeminiKey" placeholder="AIza..." autocomplete="off">
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px">
+          <button class="btn btn-vert" onclick="saveProviderKey('gemini')">💾 Enregistrer</button>
+          <button class="btn btn-rouge" onclick="deleteProviderKey('gemini')">🗑</button>
+        </div>
+        <div>
+          <label>Clé API Mistral <span id="mistralKeyStatus" style="font-weight:400"></span>
+            <a href="#" style="font-weight:400;font-size:10px" onclick="event.preventDefault();openExternalUrl('https://console.mistral.ai/api-keys')">créer ↗</a></label>
+          <input type="password" id="prefMistralKey" placeholder="..." autocomplete="off">
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px">
+          <button class="btn btn-vert" onclick="saveProviderKey('mistral')">💾 Enregistrer</button>
+          <button class="btn btn-rouge" onclick="deleteProviderKey('mistral')">🗑</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🟩 Google Sheets (base collaborative)
+      </label>
+      <div id="gsAccountZone" style="margin-bottom:10px"></div>
+      <details style="font-size:11px;margin-bottom:10px">
+        <summary style="cursor:pointer;color:var(--bleu);font-weight:600">⚙️ Configuration initiale (une seule fois) — obtenir un Client ID Google</summary>
+        <ol style="margin:8px 0 8px 18px;line-height:1.7;color:#555">
+          <li>Ouvrez <a href="#" onclick="event.preventDefault();openExternalUrl('https://console.cloud.google.com/')">console.cloud.google.com</a> et créez un projet (gratuit).</li>
+          <li>Menu « API et services » → « Bibliothèque » → activez <strong>Google Sheets API</strong>.</li>
+          <li>« Écran de consentement OAuth » : type <em>Externe</em>, ajoutez les comptes de l'entreprise comme utilisateurs test.</li>
+          <li>« Identifiants » → « Créer des identifiants » → <strong>ID client OAuth</strong> → type <strong>Application de bureau</strong>.</li>
+          <li>Copiez le Client ID et le Client Secret ci-dessous, puis cliquez sur « Se connecter avec Google ».</li>
+        </ol>
+      </details>
+      <div class="form-grid">
+        <div>
+          <label>Client ID <span id="gsClientIdStatus" style="font-weight:400"></span></label>
+          <input type="text" id="prefGsClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+        </div>
+        <div>
+          <label>Client Secret</label>
+          <input type="password" id="prefGsClientSecret" placeholder="GOCSPX-..." autocomplete="off">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-vert" onclick="gsSaveCreds()">💾 Enregistrer les identifiants</button>
+        <button class="btn btn-bleu" id="btnGsConnect" onclick="gsConnect()">🔐 Se connecter avec Google</button>
+        <button class="btn btn-rouge" id="btnGsLogout" onclick="gsLogout()" style="display:none">🚪 Se déconnecter</button>
+      </div>
+      <div id="gsLinkZone" style="margin-top:10px"></div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
         🛠️ Maintenance
       </label>
       <div class="btn-row">
@@ -756,6 +968,14 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
         </select>
       </div>
       <div><label>Prix HT (€) *</label><input type="number" id="ajPrix" step="0.01" oninput="checkAjPrice()"></div>
+      <div>
+        <label>Type de prix</label>
+        <select id="ajType">
+          <option value="vente">💰 Vente (DPGF, prix client)</option>
+          <option value="debours">🧾 Débours (devis ST, coût chantier)</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </div>
       <div><label>Date</label><input type="date" id="ajDate"></div>
       <div><label>Projet</label><input type="text" id="ajProjet" placeholder="ex : Résidence Les Pins"></div>
     </div>
@@ -773,7 +993,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
     <div class="info info-bleu" id="selDPGF"></div>
     <div class="srch-row" style="margin-top:8px">
       <select id="selLot" onchange="filtrerRep()"><option value="">Tous les lots</option></select>
-      <input type="text" id="selSearch" placeholder="🔍 Rechercher..." oninput="filtrerRep()">
+      <input type="text" id="selSearch" placeholder="🔍 Rechercher..." oninput="filtrerRepDebounced()">
     </div>
     <div class="rep-hdr"><span>Repère</span><span>Désignation</span><span>Unité</span><span>Prix HT (€)</span></div>
     <div class="rep-list" id="repList"></div>
@@ -1155,6 +1375,192 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   </div>
 </div>
 
+<!-- ★ v2.7 : Chiffrage rapide IA de la DPGF -->
+<div class="modal-bg" id="modalChiffrage" data-modal="chiffrage">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-title">⚡ Chiffrage rapide IA</div>
+    <div class="info info-bleu" id="chiffrageInfo"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="chiffScope" value="vides" checked>
+        <div><strong>Chiffrer uniquement les lignes sans prix</strong>
+        <div style="font-size:10px;color:#666">Vos prix déjà saisis/associés ne sont pas touchés (recommandé)</div></div>
+      </label>
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="chiffScope" value="toutes">
+        <div><strong style="color:#b9770e">Rechiffrer toutes les lignes</strong>
+        <div style="font-size:10px;color:#666">⚠️ Écrase les prix existants de la DPGF (pas la base)</div></div>
+      </label>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700;display:flex;align-items:center;gap:8px">
+        📑 Feuilles / lots à chiffrer
+        <button class="btn btn-gris" style="font-size:9px;padding:2px 6px" onclick="chSheetsAll(true)">☑ Tout</button>
+        <button class="btn btn-gris" style="font-size:9px;padding:2px 6px" onclick="chSheetsAll(false)">☐ Rien</button>
+      </label>
+      <div id="chiffSheets" style="border:1px solid var(--bord);border-radius:5px;max-height:170px;overflow-y:auto;margin-top:4px;
+                                   display:grid;grid-template-columns:1fr 1fr;gap:0"></div>
+    </div>
+    <div class="info info-orange" style="margin-top:10px;font-size:11px">
+      L'IA s'appuie <strong>exclusivement sur votre base de prix</strong> (candidats trouvés par similarité,
+      selon le filtre « Estimer avec » : <span id="chiffrageTypeLbl"></span>). Quand les dimensions diffèrent
+      (ex : porte 147×90 à chiffrer, portes 200×90 et 150×90 en base), elle ramène au prix au m² et proratise —
+      chaque prix est accompagné de son <strong>hypothèse vérifiable</strong> dans le rapport.
+      Un ⚡ marque les lignes chiffrées par IA ; modifier une ligne à la main efface son hypothèse.
+    </div>
+    <div id="chiffrageProgress" style="display:none;margin-top:10px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:4px" id="chiffrageProgTxt"></div>
+      <div style="height:8px;background:var(--bord);border-radius:4px;overflow:hidden">
+        <div id="chiffrageProgBar" style="height:100%;width:0%;background:var(--vert);transition:width .3s"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" id="btnChiffAnnuler" onclick="cancelChiffrage()">Annuler</button>
+      <button class="btn btn-vert" id="btnChiffGo" onclick="startChiffrage()">⚡ Lancer le chiffrage</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.7 : Rapport d'hypothèses du chiffrage IA -->
+<div class="modal-bg" id="modalRapportIA" data-modal="rapportia">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-title">📋 Rapport de chiffrage IA — hypothèses prises</div>
+    <div id="rapportIaResume" class="info info-bleu"></div>
+    <div id="rapportIaBody" style="max-height:440px;overflow-y:auto;border:1px solid var(--bord);border-radius:5px;margin-top:8px"></div>
+    <div class="modal-foot">
+      <button class="btn btn-bleu" onclick="copierRapportIA()">📋 Copier le rapport (texte)</button>
+      <button class="btn btn-gris" onclick="closeModal('modalRapportIA')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6.1 : Création / édition d'un ratio personnalisé -->
+<div class="modal-bg" id="modalRatioEdit" data-modal="ratioedit">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-title" id="crTitle">+ Créer un ratio personnalisé</div>
+    <div class="form-grid">
+      <div><label>Nom du ratio *</label><input type="text" id="crNom" placeholder="ex : Béton C30/37 CEM III"></div>
+      <div><label>Lot (optionnel)</label><select id="crLot"></select></div>
+      <div>
+        <label>Unité (optionnel, recommandé)</label>
+        <select id="crUnite">
+          <option value="">Toutes</option>
+          <option>m2</option><option>ml</option><option>m3</option><option>u</option>
+          <option>ens</option><option>kg</option><option>h</option><option>forfait</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:8px">
+      <div>
+        <label>Mots-clés à trouver dans la désignation (séparés par des virgules)</label>
+        <input type="text" id="crMots" placeholder="ex : c30/37, cem iii" oninput="crRefreshPreview()">
+        <div class="help-text">Une ligne correspond si sa désignation contient TOUS ces mots (accents/majuscules ignorés). Vide = sélection 100 % manuelle.</div>
+      </div>
+      <div>
+        <label>Mots-clés à exclure (optionnel)</label>
+        <input type="text" id="crMotsExclus" placeholder="ex : reprise, plus-value" oninput="crRefreshPreview()">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700">Aperçu des prix correspondants <span id="crPreviewCount" style="font-weight:400;color:#888"></span></label>
+      <div id="crPreview" style="border:1px solid var(--bord);border-radius:5px;max-height:220px;overflow-y:auto;margin-top:4px"></div>
+      <div class="help-text" style="margin-top:4px">☑ décochez une ligne pour l'exclure de ce ratio. Pour ajouter un prix qui ne matche pas les mots-clés, cherchez-le :</div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <input type="text" id="crAddSearch" placeholder="🔍 Chercher un prix à ajouter à la main..." oninput="crRefreshAddList()" style="flex:1">
+      </div>
+      <div id="crAddList" style="border:1px dashed var(--bord);border-radius:5px;max-height:140px;overflow-y:auto;margin-top:4px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-rouge" id="crBtnDelete" style="display:none;margin-right:auto" onclick="deleteCustomRatio()">🗑 Supprimer ce ratio</button>
+      <button class="btn btn-gris" onclick="closeModal('modalRatioEdit')">Annuler</button>
+      <button class="btn btn-vert" onclick="saveCustomRatio()">✅ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6.1 : Typage en masse Vente/Débours -->
+<div class="modal-bg" id="modalBulkType" data-modal="bulktype">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">🏷 Typer les prix filtrés</div>
+    <div class="info info-bleu" id="bulkTypeInfo"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="vente" checked>
+        <div><strong style="color:#2980b9">💰 Prix de vente</strong>
+        <div style="font-size:10px;color:#666">DPGF remises aux clients, prix de vente entreprise</div></div>
+      </label>
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="debours">
+        <div><strong style="color:#d35400">🧾 Prix débours</strong>
+        <div style="font-size:10px;color:#666">Devis sous-traitants, coûts chantier</div></div>
+      </label>
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="nc">
+        <div><strong style="color:#888">· Non défini</strong>
+        <div style="font-size:10px;color:#666">Retirer le type de ces lignes</div></div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalBulkType')">Annuler</button>
+      <button class="btn btn-vert" onclick="confirmBulkType()">✅ Appliquer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6 : Choix du type de liaison -->
+<div class="modal-bg" id="modalLinkType" data-modal="linktype">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">🔗 Lier une base de prix</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <label style="display:flex;gap:10px;padding:12px;border:2px solid var(--bord);border-radius:8px;cursor:pointer"
+             onclick="closeModal('modalLinkType');linkExcel()">
+        <span style="font-size:22px">📊</span>
+        <div style="flex:1">
+          <strong style="font-size:13px;color:var(--bleu)">Fichier Excel (local / NAS)</strong>
+          <div style="font-size:11px;color:#666;margin-top:3px">
+            Liaison classique avec un classeur .xlsx/.xlsm. Sync fichier entier, détection de conflit par hash.
+          </div>
+        </div>
+      </label>
+      <label style="display:flex;gap:10px;padding:12px;border:2px solid var(--bord);border-radius:8px;cursor:pointer"
+             onclick="closeModal('modalLinkType');openGsLinkModal()">
+        <span style="font-size:22px">🟩</span>
+        <div style="flex:1">
+          <strong style="font-size:13px;color:#188038">Google Sheets (collaboratif) — recommandé</strong>
+          <div style="font-size:11px;color:#666;margin-top:3px">
+            Feuille partagée en ligne, plusieurs utilisateurs en même temps, sync ligne à ligne,
+            chaque modification signée par son auteur. Nécessite une connexion Google (Paramètres).
+          </div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalLinkType')">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6 : Liaison Google Sheets -->
+<div class="modal-bg" id="modalGsLink" data-modal="gslink">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-title">🟩 Lier une feuille Google Sheets</div>
+    <div class="info info-bleu" id="gsLinkInfo">
+      Collez l'URL de la feuille Google Sheets qui servira de <strong>base maître partagée</strong>.
+      Un onglet <code>BASE_PRIX</code> y sera créé s'il n'existe pas. Tous les collaborateurs
+      doivent avoir accès en écriture à cette feuille (bouton « Partager » dans Google Sheets).
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700">URL de la feuille</label>
+      <input type="text" id="gsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/XXXXXXXX/edit">
+    </div>
+    <div class="info info-orange" id="gsLinkWarning" style="display:none;margin-top:8px"></div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalGsLink')">Annuler</button>
+      <button class="btn btn-vert" id="btnGsLinkConfirm" onclick="gsConfirmLink()">✅ Lier cette feuille</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div id="toast"></div>
 
@@ -1162,7 +1568,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.5.3';
+const APP_VERSION = '2.7.2';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1187,6 +1593,12 @@ PREFS.checkExternal = PREFS.checkExternal !== false;       // ★ v2.3
 PREFS.autoSnapshot  = PREFS.autoSnapshot !== false;        // ★ v2.3
 PREFS.ratioExclusions = PREFS.ratioExclusions || [];       // ★ v2.5+ : signatures de prix exclus du calcul de ratio
 PREFS.anomalyExclusions = PREFS.anomalyExclusions || [];   // ★ v2.5.2 : signatures de prix marqués "C'est normal"
+PREFS.dpgfTypeFilter  = PREFS.dpgfTypeFilter  || 'tous';   // ★ v2.6.1 : estimer la DPGF avec vente/débours/tous
+PREFS.ratioTypeFilter = PREFS.ratioTypeFilter || 'tous';   // ★ v2.6.1 : ratios calculés sur vente/débours/tous
+PREFS.lastTypePrix    = PREFS.lastTypePrix    || 'vente';  // ★ v2.6.1 : dernier type utilisé à la saisie
+PREFS.customRatios    = PREFS.customRatios    || [];       // ★ v2.6.1 : ratios définis par l'utilisateur
+PREFS.iaProvider      = PREFS.iaProvider      || 'claude'; // ★ v2.7 : fournisseur IA (claude/gemini/mistral)
+PREFS.iaModels        = PREFS.iaModels        || {};       // ★ v2.7.1 : modèle personnalisé par fournisseur
 
 // LOTS = liste active (référence dynamique vers PREFS.lots)
 let LOTS = PREFS.lots;
@@ -1205,6 +1617,10 @@ let gCb    = null;
 let dpgfView = 'sections';
 let detectedSheets = [];
 let pendingDPGFwb = null;
+// ★ v2.7.2 — traçabilité du classeur source pour l'export à l'identique
+let dpgfSrcName = '';        // nom du fichier DPGF chargé
+let dpgfSheetCols = {};      // nom de feuille → colonnes détectées (dont prix)
+let dpgfSheetFilter = '';    // '' = toutes les feuilles (sélecteur de la page DPGF)
 let isElectron = !!window.electronAPI;
 let editingLotIdx = -1;
 let editingLotMode = 'add'; // 'add' ou 'edit'
@@ -1230,6 +1646,9 @@ const MAX_UNDO = 20;
 
 // ★ v2.4 — Tri tableaux
 let baseSortCol = null, baseSortDir = 1;
+// ★ v2.6.1 — Pagination de la page Base (rendu par tranches pour rester fluide)
+const BASE_PAGE_SIZE = 300;
+let baseRenderLimit = BASE_PAGE_SIZE;
 let ratiosSortCol = null, ratiosSortDir = 1;
 
 // ★ v2.4 — Ratios expansibles
@@ -1244,7 +1663,82 @@ let syncDebounce    = null;
 /* ============================================================
    UTILITAIRES
    ============================================================ */
-function save(skipSync) {
+/* ★ v2.6 — identifiant stable par prix (nécessaire à la sync Google Sheets ligne à ligne) */
+function genId() {
+  return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
+}
+function ensureIds() {
+  let changed = false;
+  BASE.forEach(r => { if (!r.id) { r.id = genId(); changed = true; } });
+  return changed;
+}
+
+/* ★ v2.6.1 — Type de prix : débours (devis sous-traitant, coût chantier)
+   ou vente (DPGF prix client). Les prix non classés restent visibles partout
+   mais peuvent être filtrés. */
+const TYPES_PRIX = {
+  vente:   { label: 'Vente',   short: 'V', color: '#2980b9' },
+  debours: { label: 'Débours', short: 'D', color: '#d35400' }
+};
+function normTypePrix(r) {
+  const t = r && r.typePrix;
+  return (t === 'debours' || t === 'vente') ? t : 'nc';
+}
+function typeBadge(r) {
+  const t = normTypePrix(r);
+  if (t === 'nc') return '<span class="badge" style="background:#eee;color:#999" title="Type non défini (Vente/Débours)">·</span>';
+  const d = TYPES_PRIX[t];
+  return `<span class="badge" style="background:${d.color}22;color:${d.color}" title="Prix de ${d.label.toLowerCase()}">${d.short}</span>`;
+}
+function poolByType(sel) {
+  if (!sel || sel === 'tous') return BASE;
+  return BASE.filter(r => normTypePrix(r) === sel);
+}
+// Pools filtrés utilisés par l'estimation DPGF et par les ratios
+function dpgfPool()  { return poolByType(PREFS.dpgfTypeFilter); }
+function ratioPool() { return poolByType(PREFS.ratioTypeFilter); }
+
+/* ★ v2.6.1 — Index d'anomalies : pré-calcule min/max par (repère, type) en un
+   seul passage sur BASE, au lieu d'un filtre complet PAR LIGNE affichée
+   (c'était la cause principale des lags au-delà de ~2000 prix). */
+function buildAnomalyIndex() {
+  const m = new Map();
+  for (const r of BASE) {
+    const k = r.repere + '||' + normTypePrix(r);
+    let g = m.get(k);
+    if (!g) { g = { count: 0, min1: Infinity, min2: Infinity, max1: -Infinity, max2: -Infinity, cntMin: 0, cntMax: 0 }; m.set(k, g); }
+    g.count++;
+    const p = r.prix;
+    if (p < g.min1)       { g.min2 = g.min1; g.min1 = p; g.cntMin = 1; }
+    else if (p === g.min1){ g.cntMin++; }
+    else if (p < g.min2)  { g.min2 = p; }
+    if (p > g.max1)       { g.max2 = g.max1; g.max1 = p; g.cntMax = 1; }
+    else if (p === g.max1){ g.cntMax++; }
+    else if (p > g.max2)  { g.max2 = p; }
+  }
+  return m;
+}
+// Équivalent de isAnomaly(r) mais en O(1) grâce à l'index ("les autres prix" =
+// le groupe privé de cette ligne, reconstruit via les 2 premiers extrêmes)
+function isAnomalyIdx(r, idx) {
+  if (isAnomalyMarkedNormal(r)) return false;
+  const g = idx.get(r.repere + '||' + normTypePrix(r));
+  if (!g || g.count < 3) return false;
+  const othersMin = (r.prix === g.min1 && g.cntMin === 1) ? g.min2 : g.min1;
+  const othersMax = (r.prix === g.max1 && g.cntMax === 1) ? g.max2 : g.max1;
+  if (!isFinite(othersMin) || !isFinite(othersMax)) return false;
+  return r.prix < othersMin * 0.5 || r.prix > othersMax * 2;
+}
+
+/* ★ v2.6.2 perf — l'écriture localStorage est différée (500 ms) : sérialiser
+   toute la base (~1,5 Mo à 4600 prix) à CHAQUE modification gelait l'UI.
+   persistBaseNow() force l'écriture immédiate (fermeture, reset…). */
+let _persistTimer = null;
+let _persistDirty = false;
+function persistBaseNow() {
+  if (!_persistDirty) return;
+  _persistDirty = false;
+  clearTimeout(_persistTimer);
   localStorage.setItem('bp', JSON.stringify(BASE));
   // Nettoyer les exclusions orphelines (prix qui n'existent plus dans BASE)
   let prefsChanged = false;
@@ -1262,6 +1756,14 @@ function save(skipSync) {
     if (PREFS.anomalyExclusions.length !== before) prefsChanged = true;
   }
   if (prefsChanged) localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+}
+window.addEventListener('beforeunload', persistBaseNow);
+
+function save(skipSync) {
+  ensureIds();
+  _persistDirty = true;
+  clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(persistBaseNow, 500);
   if (!skipSync) scheduleSync();
 }
 function $ (id){ return document.getElementById(id); }
@@ -1295,17 +1797,37 @@ function toast(msg, type='vert', dur=2800, undoCb=null){
   }, dur);
 }
 
-/* ★ v2.4 — Système d'Undo simple (snapshot complet) */
+/* ★ v2.4 — Système d'Undo (snapshot complet)
+   ★ v2.6.2 perf — l'état est stocké en UNE chaîne JSON (une seule
+   sérialisation par action) au lieu d'une copie profonde stringify+parse :
+   ~2× moins de travail par action et ~3× moins de RAM sur les 2×20 niveaux. */
+function makeUndoSnapshot(label) {
+  return {
+    label,
+    json: JSON.stringify({
+      base: BASE,
+      lots: LOTS,
+      lotColors: PREFS.lotColors,
+      ratioExclusions: PREFS.ratioExclusions || []
+    }),
+    time: Date.now()
+  };
+}
+function applyUndoSnapshot(snap) {
+  const d = JSON.parse(snap.json);
+  BASE = d.base;
+  LOTS = d.lots; PREFS.lots = LOTS;
+  PREFS.lotColors = d.lotColors;
+  PREFS.ratioExclusions = d.ratioExclusions;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  save();
+  initUI(); renderAccueil(); renderBase(); renderRatios();
+  updateUndoRedoButtons();
+}
+
 function pushUndo(label) {
   // Sauvegarde l'état AVANT le changement
-  undoStack.push({
-    label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  undoStack.push(makeUndoSnapshot(label));
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   // Toute nouvelle action vide la pile redo
   redoStack = [];
@@ -1318,24 +1840,10 @@ function undo() {
     return;
   }
   // Sauver l'état actuel dans la pile redo avant de revenir en arrière
-  redoStack.push({
-    label: undoStack[undoStack.length-1].label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  redoStack.push(makeUndoSnapshot(undoStack[undoStack.length-1].label));
   if (redoStack.length > MAX_UNDO) redoStack.shift();
   const last = undoStack.pop();
-  BASE = last.base;
-  LOTS = last.lots; PREFS.lots = LOTS;
-  PREFS.lotColors = last.lotColors;
-  PREFS.ratioExclusions = last.ratioExclusions;
-  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
-  save();
-  initUI(); renderAccueil(); renderBase(); renderRatios();
-  updateUndoRedoButtons();
+  applyUndoSnapshot(last);
   toast(`↩ Annulé : ${last.label}`, 'bleu', 2500);
 }
 
@@ -1345,24 +1853,10 @@ function redo() {
     return;
   }
   // Sauver l'état actuel dans undoStack avant de refaire en avant
-  undoStack.push({
-    label: redoStack[redoStack.length-1].label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  undoStack.push(makeUndoSnapshot(redoStack[redoStack.length-1].label));
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   const next = redoStack.pop();
-  BASE = next.base;
-  LOTS = next.lots; PREFS.lots = LOTS;
-  PREFS.lotColors = next.lotColors;
-  PREFS.ratioExclusions = next.ratioExclusions;
-  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
-  save();
-  initUI(); renderAccueil(); renderBase(); renderRatios();
-  updateUndoRedoButtons();
+  applyUndoSnapshot(next);
   toast(`↪ Rétabli : ${next.label}`, 'bleu', 2500);
 }
 
@@ -1554,11 +2048,12 @@ function showPage(p){
   if (p==='dpgf')      renderDPGF();
   if (p==='params')    renderParams();
   if (p==='historique')renderHistorique();
+  if (p==='importia' && typeof renderImportIA==='function') renderImportIA();
 }
 function showLot(lot){
   showPage('base');
   $('filterLot').value = lot;
-  $('baseTitle').textContent = '📦 ' + lot;
+  baseRenderLimit = BASE_PAGE_SIZE;
   renderBase();
 }
 document.querySelectorAll('.nav-btn[data-page], .sb-item[data-page]').forEach(b=>{
@@ -1569,9 +2064,12 @@ document.querySelectorAll('.nav-btn[data-page], .sb-item[data-page]').forEach(b=
    INIT UI
    ============================================================ */
 function initUI(){
+  // ★ v2.6.2 perf — compteurs par lot en un seul passage (au lieu de 14 filtres complets)
+  const lotCounts = new Map();
+  BASE.forEach(r => lotCounts.set(r.lot, (lotCounts.get(r.lot) || 0) + 1));
   // Sidebar lots avec drag handles
   $('sbLots').innerHTML = LOTS.map((l,i)=>{
-    const cnt = BASE.filter(r=> r.lot===l).length;
+    const cnt = lotCounts.get(l) || 0;
     return `<div class="sb-item" data-lot-idx="${i}" draggable="true" onclick="showLot('${esc(l)}')">
       <span class="lot-dot" style="background:${PREFS.lotColors[i]||'#888'}"></span>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l)}</span>
@@ -1632,23 +2130,48 @@ function renderAccueil(){
 /* ============================================================
    ★ v2.4 ★ BASE — affichage avec tri, édition inline, filtres combinés
    ============================================================ */
+/* ★ v2.6.1 — renderBase optimisé pour les grosses bases (4000+ prix) :
+   - un seul passage de filtrage qui CONSERVE l'index (fini le BASE.indexOf
+     par ligne qui rendait le rendu quadratique) ;
+   - détection d'anomalie via index pré-calculé (O(1) par ligne) ;
+   - pagination par tranches de 300 lignes ;
+   - un seul écouteur dblclick délégué au lieu d'un par cellule ;
+   - recherche « debouncée » (voir debouncedRenderBase). */
 function renderBase(){
   const srch = ($('searchBase').value||'').toLowerCase();
   const lot  = $('filterLot').value;
   const proj = $('filterProj').value;
   const annee= $('filterAnnee').value;
-  let d = BASE.filter(r =>
-    (!lot   || r.lot===lot) &&
-    (!proj  || r.projet===proj) &&
-    (!annee || (r.date||'').startsWith(annee)) &&
-    (!srch  || r.designation.toLowerCase().includes(srch)
-            || r.repere.toLowerCase().includes(srch)
-            || (r.projet||'').toLowerCase().includes(srch)));
+  const typeF= $('filterType') ? $('filterType').value : '';
+
+  // ★ v2.6.1 — le titre reflète le filtre réel (fix : il restait bloqué sur le dernier lot cliqué)
+  $('baseTitle').textContent = lot ? '📦 ' + lot : '📦 Base de Prix';
+
+  // Filtrage en un passage, index d'origine conservé
+  let d = [];
+  for (let i = 0; i < BASE.length; i++) {
+    const r = BASE[i];
+    if (lot   && r.lot !== lot) continue;
+    if (proj  && r.projet !== proj) continue;
+    if (annee && !(r.date||'').startsWith(annee)) continue;
+    if (typeF && normTypePrix(r) !== typeF) continue;
+    if (srch  && !(r.designation.toLowerCase().includes(srch)
+               || r.repere.toLowerCase().includes(srch)
+               || (r.projet||'').toLowerCase().includes(srch))) continue;
+    d.push({ r, i });
+  }
 
   // Tri
-  if (baseSortCol) {
-    d.sort((a,b) => {
-      let va = a[baseSortCol], vb = b[baseSortCol];
+  if (baseSortCol === '__multi') {
+    // ★ v2.6 — tri groupé Lot (ordre des lots) › Date (récent d'abord) › Chantier
+    d.sort((a,b) =>
+      (lotIdx(a.r.lot) - lotIdx(b.r.lot)) ||
+      String(b.r.date||'').localeCompare(String(a.r.date||'')) ||
+      String(a.r.projet||'').localeCompare(String(b.r.projet||'')));
+  } else if (baseSortCol) {
+    d.sort((x,y) => {
+      let va = baseSortCol === 'typePrix' ? normTypePrix(x.r) : x.r[baseSortCol];
+      let vb = baseSortCol === 'typePrix' ? normTypePrix(y.r) : y.r[baseSortCol];
       if (typeof va === 'number' && typeof vb === 'number') return (va-vb)*baseSortDir;
       return String(va||'').localeCompare(String(vb||''))*baseSortDir;
     });
@@ -1659,6 +2182,7 @@ function renderBase(){
   const cols = [
     {k:'repere',      label:'Repère'},
     {k:'lot',         label:'Lot'},
+    {k:'typePrix',    label:'Type'},
     {k:'designation', label:'Désignation'},
     {k:'unite',       label:'Unité'},
     {k:'prix',        label:'Prix HT', align:'right'},
@@ -1670,36 +2194,102 @@ function renderBase(){
     return `<th class="sortable ${cls}" onclick="sortBase('${c.k}')" style="text-align:${c.align||'left'}">${c.label}</th>`;
   }).join('') + '<th></th>';
 
+  const anomIdx = buildAnomalyIndex();
+  const shown = d.slice(0, baseRenderLimit);
+  const rowsHtml = shown.map(({r, i}) => {
+    const anom = isAnomalyIdx(r, anomIdx) ? ` <span class="anomaly-icon" title="Cliquer pour voir le détail" onclick="event.stopPropagation();openAnomalyPopup(${i})">⚠️</span>` : '';
+    return `<tr data-idx="${i}">
+      <td class="editable" data-field="repere"><strong>${esc(r.repere)}</strong></td>
+      <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
+      <td style="text-align:center">${typeBadge(r)}</td>
+      <td class="editable" data-field="designation">${esc(r.designation)}</td>
+      <td class="editable" data-field="unite">${esc(r.unite)}</td>
+      <td class="editable" data-field="prix" style="text-align:right"><strong style="color:#085041">${fmtPrix(r.prix)}</strong>${anom}</td>
+      <td class="editable" data-field="date" style="color:#888;font-size:10px">${esc(r.date)||'—'}</td>
+      <td class="editable" data-field="projet" style="font-size:10px">${esc(r.projet)||'—'}</td>
+      <td style="display:flex;gap:3px">
+        <button class="btn btn-bleu" style="padding:2px 7px;font-size:10px" onclick="openEdit(${i})">✏️</button>
+        <button class="btn btn-rouge" style="padding:2px 7px;font-size:10px" onclick="delPrix(${i})">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const moreHtml = d.length > shown.length
+    ? `<tr><td colspan="9" style="text-align:center;padding:10px">
+         <button class="btn btn-gris" onclick="baseRenderLimit+=1000;renderBase()">⬇ Afficher 1000 de plus (${d.length - shown.length} restants)</button>
+         <button class="btn btn-gris" onclick="baseRenderLimit=Infinity;renderBase()">Tout afficher</button>
+       </td></tr>`
+    : '';
+
   $('tblBase').innerHTML =
     `<thead><tr>${headHtml}</tr></thead>
-     <tbody>${d.map((r)=>{
-       const i = BASE.indexOf(r);
-       const anom = isAnomaly(r) ? ` <span class="anomaly-icon" title="Cliquer pour voir le détail" onclick="event.stopPropagation();openAnomalyPopup(${i})">⚠️</span>` : '';
-       return `<tr data-idx="${i}">
-        <td class="editable" data-field="repere"><strong>${esc(r.repere)}</strong></td>
-        <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
-        <td class="editable" data-field="designation">${esc(r.designation)}</td>
-        <td class="editable" data-field="unite">${esc(r.unite)}</td>
-        <td class="editable" data-field="prix" style="text-align:right"><strong style="color:#085041">${fmtPrix(r.prix)}</strong>${anom}</td>
-        <td class="editable" data-field="date" style="color:#888;font-size:10px">${esc(r.date)||'—'}</td>
-        <td class="editable" data-field="projet" style="font-size:10px">${esc(r.projet)||'—'}</td>
-        <td style="display:flex;gap:3px">
-          <button class="btn btn-bleu" style="padding:2px 7px;font-size:10px" onclick="openEdit(${i})">✏️</button>
-          <button class="btn btn-rouge" style="padding:2px 7px;font-size:10px" onclick="delPrix(${i})">🗑</button>
-        </td>
-      </tr>`;
-     }).join('')||'<tr><td colspan="8" style="text-align:center;color:#888;padding:20px">Aucun prix trouvé</td></tr>'}</tbody>`;
-
-  // Activer édition inline (double-clic)
-  $('tblBase').querySelectorAll('td.editable').forEach(td => {
-    td.addEventListener('dblclick', () => editInline(td));
-  });
+     <tbody>${rowsHtml + moreHtml || '<tr><td colspan="9" style="text-align:center;color:#888;padding:20px">Aucun prix trouvé</td></tr>'}</tbody>`;
 }
+
+// Recherche : re-rendu différé pour ne pas re-générer 4000 lignes à chaque frappe
+let _rbDebounce = null;
+function debouncedRenderBase() {
+  clearTimeout(_rbDebounce);
+  _rbDebounce = setTimeout(() => { baseRenderLimit = BASE_PAGE_SIZE; renderBase(); }, 200);
+}
+function resetAndRenderBase() { baseRenderLimit = BASE_PAGE_SIZE; renderBase(); }
+
+// Édition inline : un seul écouteur délégué (au lieu d'un par cellule)
+document.addEventListener('DOMContentLoaded', () => {
+  $('tblBase').addEventListener('dblclick', e => {
+    const td = e.target.closest('td.editable');
+    if (td) editInline(td);
+  });
+});
 
 function sortBase(col) {
   if (baseSortCol === col) baseSortDir = -baseSortDir;
   else { baseSortCol = col; baseSortDir = 1; }
   renderBase();
+}
+
+/* ★ v2.6.1 — Typage en masse des lignes actuellement filtrées (Vente/Débours) */
+function baseFilteredIndices() {
+  const srch = ($('searchBase').value||'').toLowerCase();
+  const lot  = $('filterLot').value;
+  const proj = $('filterProj').value;
+  const annee= $('filterAnnee').value;
+  const typeF= $('filterType') ? $('filterType').value : '';
+  const out = [];
+  for (let i = 0; i < BASE.length; i++) {
+    const r = BASE[i];
+    if (lot   && r.lot !== lot) continue;
+    if (proj  && r.projet !== proj) continue;
+    if (annee && !(r.date||'').startsWith(annee)) continue;
+    if (typeF && normTypePrix(r) !== typeF) continue;
+    if (srch  && !(r.designation.toLowerCase().includes(srch)
+               || r.repere.toLowerCase().includes(srch)
+               || (r.projet||'').toLowerCase().includes(srch))) continue;
+    out.push(i);
+  }
+  return out;
+}
+function openBulkType() {
+  const idxs = baseFilteredIndices();
+  if (!idxs.length) { toast('Aucune ligne dans le filtre actuel', 'orange'); return; }
+  $('bulkTypeInfo').innerHTML = `Le type choisi sera appliqué aux <strong>${idxs.length} prix actuellement filtrés</strong>
+    (affinez d'abord avec la recherche et les filtres Lot/Projet/Année si besoin).`;
+  openModal('modalBulkType');
+}
+function confirmBulkType() {
+  const choice = document.querySelector('input[name="bulkType"]:checked').value;
+  const idxs = baseFilteredIndices();
+  if (!idxs.length) { closeModal('modalBulkType'); return; }
+  pushUndo(`Typage en masse (${idxs.length} prix)`);
+  idxs.forEach(i => {
+    if (choice === 'nc') delete BASE[i].typePrix;
+    else BASE[i].typePrix = choice;
+  });
+  save();
+  closeModal('modalBulkType');
+  renderBase(); renderAccueil();
+  const lbl = choice === 'nc' ? 'Non défini' : TYPES_PRIX[choice].label;
+  toast(`🏷 ${idxs.length} prix marqués « ${lbl} »`, 'vert', 3000);
 }
 
 /* ★ v2.4 — Édition inline */
@@ -1770,6 +2360,7 @@ function openAjout(){
   $('ajDate').value = new Date().toISOString().slice(0,10);
   $('ajLot').selectedIndex = 0;
   $('ajUnite').selectedIndex = 0;
+  $('ajType').value = PREFS.lastTypePrix || 'vente';
   $('ajRatioInfo').style.display = 'none';
   $('ajAnomalyInfo').style.display = 'none';
   $('ajDoublonInfo').style.display = 'none';
@@ -1787,6 +2378,7 @@ function openEdit(i){
   $('ajDesg').value  = r.designation;
   $('ajUnite').value = r.unite;
   $('ajPrix').value  = r.prix;
+  $('ajType').value  = normTypePrix(r);
   $('ajDate').value  = r.date || '';
   $('ajProjet').value = r.projet || '';
   onRepChange();
@@ -1827,7 +2419,8 @@ function checkAjPrice() {
     $('ajDoublonInfo').style.display = 'none';
     return;
   }
-  const matchs = BASE.filter(r => r.repere === rep);
+  const typeSel = $('ajType') ? $('ajType').value : 'nc';
+  const matchs = BASE.filter(r => r.repere === rep && normTypePrix(r) === typeSel);
   if (matchs.length < 2) {
     $('ajAnomalyInfo').style.display = 'none';
   } else {
@@ -1875,7 +2468,9 @@ function markAnomalyNormal(r) {
 
 function isAnomaly(r) {
   if (isAnomalyMarkedNormal(r)) return false;
-  const matchs = BASE.filter(x => x.repere === r.repere);
+  // ★ v2.6.1 : comparer uniquement des prix du même type (un débours vs un
+  // prix de vente n'est pas une anomalie, c'est une marge)
+  const matchs = BASE.filter(x => x.repere === r.repere && normTypePrix(x) === normTypePrix(r));
   if (matchs.length < 3) return false;
   const others = matchs.filter(x => x !== r).map(x => x.prix);
   if (!others.length) return false;
@@ -1884,8 +2479,8 @@ function isAnomaly(r) {
 }
 
 function getAnomalyStats(r) {
-  // Renvoie les stats complètes pour la popup
-  const matchs = BASE.filter(x => x.repere === r.repere && x !== r);
+  // Renvoie les stats complètes pour la popup (même type de prix uniquement)
+  const matchs = BASE.filter(x => x.repere === r.repere && x !== r && normTypePrix(x) === normTypePrix(r));
   if (!matchs.length) return null;
   const prix = matchs.map(x => x.prix);
   const min = Math.min(...prix), max = Math.max(...prix);
@@ -1973,12 +2568,20 @@ function enregistrer(){
     return;
   }
   pushUndo(editIndex >= 0 ? 'Modification prix' : 'Ajout prix');
+  const typeSel = $('ajType').value;
   const obj = {
     repere: rep, lot, designation: desg,
     unite: $('ajUnite').value,
     prix, date: $('ajDate').value, projet: $('ajProjet').value.trim()
   };
-  if (editIndex >= 0) { BASE[editIndex] = obj; toast('Prix modifié', 'bleu'); }
+  if (typeSel !== 'nc') { obj.typePrix = typeSel; PREFS.lastTypePrix = typeSel; localStorage.setItem('bp_prefs', JSON.stringify(PREFS)); }
+  if (editIndex >= 0) {
+    // ★ v2.6.1 fix : conserver l'id stable de la ligne (sinon la sync Google Sheets
+    // voyait chaque modification comme une suppression + un ajout)
+    obj.id = BASE[editIndex].id;
+    if (BASE[editIndex].source) obj.source = BASE[editIndex].source;
+    BASE[editIndex] = obj; toast('Prix modifié', 'bleu');
+  }
   else                { BASE.push(obj);          toast('Prix ajouté', 'vert'); }
   save(); closeModal('modalAjout');
   initUI(); renderBase(); renderAccueil();
@@ -1988,28 +2591,29 @@ function enregistrer(){
 /* ============================================================
    ★ v2.4 ★ DPGF — Avec suggestions intelligentes (similarité textuelle)
    ============================================================ */
-function renderDPGF(){
-  $('sbCntDpgf').textContent = DPGF.length || '';
-  if (!DPGF.length){
-    $('dpgfCard').classList.add('hidden');
-    return;
-  }
-  $('dpgfCard').classList.remove('hidden');
-  const ok = DPGF.filter(r=> r.prix > 0).length;
-  $('dpgfStats').innerHTML =
-    `<span class="badge badge-vert">${ok} associés</span>
-     <span class="badge badge-rouge">${DPGF.length-ok} non associés</span>`;
+/* ★ v2.7 perf — la page DPGF re-générait TOUTES les lignes (4000+) à chaque
+   clic E/R ou saisie de prix (plusieurs secondes de gel — sans rapport avec la
+   sync Google Sheets, qui ne touche pas à la DPGF). Désormais :
+   - rendu paginé par tranches de 300 lignes ;
+   - modification d'une ligne = mise à jour de CETTE ligne seule dans le DOM. */
+const DPGF_PAGE_SIZE = 300;
+let dpgfRenderLimit = DPGF_PAGE_SIZE;
 
-  const HDR = `<div class="dpgf-hdr">
-    <span>Rep. DPGF</span><span>Descriptif</span><span>U.</span><span>Qté</span>
-    <span>Repère interne</span><span>Prix unit.</span><span>Total HT</span>
-    <span>Mode</span><span></span>
-  </div>`;
+const DPGF_HDR = `<div class="dpgf-hdr">
+  <span>Rep. DPGF</span><span>Descriptif</span><span>U.</span><span>Qté</span>
+  <span>Repère interne</span><span>Prix unit.</span><span>Total HT</span>
+  <span>Mode</span><span></span>
+</div>`;
 
-  const buildRow = (r, i) => `
+function buildDpgfRow(r, i) {
+  const desc = (dpgfView === 'continue') ? `[${r.sheet||'?'}] ${r.descriptif}` : r.descriptif;
+  const iaBadge = r.ia
+    ? ` <span title="⚡ Chiffré par IA (${esc(r.ia.methode)}) — ${esc(r.ia.hypothese)}" style="cursor:help">⚡</span>`
+    : '';
+  return `
     <div class="dpgf-row ${r.prix>0?'ok':''}" data-idx="${i}">
       <span style="font-size:10px;color:#666;font-family:Consolas,monospace">${esc(r.repDPGF)||'—'}</span>
-      <span title="${esc(r.descriptif)}">${esc(r.descriptif)}</span>
+      <span title="${esc(r.descriptif)}">${esc(desc)}</span>
       <span>${esc(r.unite)||'—'}</span>
       <span style="text-align:right">${r.qte ? fmtQte(r.qte) : '—'}</span>
       <input class="mini-input" type="text" value="${esc(r.repere)}"
@@ -2018,7 +2622,7 @@ function renderDPGF(){
       <input class="mini-input" type="number" step="0.01"
              value="${r.prix>0?r.prix:''}" placeholder="—"
              onchange="onDpgfPrixInline(${i}, this.value)">
-      <span style="font-weight:700;text-align:right">${r.total>0?fmtPrix(r.total):'—'}</span>
+      <span style="font-weight:700;text-align:right">${r.total>0?fmtPrix(r.total):'—'}${iaBadge}</span>
       <span class="dpgf-mode-toggle">
         <button class="${r.mode==='exact'?'on':''}" onclick="setDpgfMode(${i},'exact')">E</button>
         <button class="${r.mode==='ratio'?'on':''}" onclick="setDpgfMode(${i},'ratio')">R</button>
@@ -2026,62 +2630,136 @@ function renderDPGF(){
       <button class="btn btn-bleu" style="padding:3px 6px;font-size:10px"
               onclick="openSel(${i})">Choisir…</button>
     </div>`;
+}
 
-  const reps = [...new Set(BASE.map(r=> r.repere))].sort();
+function dpgfUpdateStats() {
+  $('sbCntDpgf').textContent = DPGF.length || '';
+  const ok = DPGF.filter(r=> r.prix > 0).length;
+  const total = DPGF.reduce((s, r) => s + (r.total || 0), 0);
+  $('dpgfStats').innerHTML =
+    `<span class="badge badge-vert">${ok} associés</span>
+     <span class="badge badge-rouge">${DPGF.length-ok} non associés</span>
+     ${total > 0 ? `<span class="badge badge-bleu">Σ ${fmtPrix(total)}</span>` : ''}`;
+}
+
+// Mise à jour chirurgicale : seule la ligne modifiée est re-générée
+function dpgfUpdateRow(i) {
+  const el = document.querySelector(`#dpgfRows .dpgf-row[data-idx="${i}"]`);
+  if (!el) { renderDPGF(); return; }
+  el.outerHTML = buildDpgfRow(DPGF[i], i);
+  dpgfUpdateStats();
+}
+
+// ★ v2.7.2 — sélecteur de feuille : corrige "je ne peux plus changer de
+// feuille" (la pagination coupait les feuilles suivantes) et permet de
+// travailler lot par lot.
+function setDpgfSheetFilter(v){
+  dpgfSheetFilter = v;
+  dpgfRenderLimit = DPGF_PAGE_SIZE;
+  renderDPGF();
+}
+function dpgfSheetNames(){
+  return [...new Set(DPGF.map(r => r.sheet || '(sans nom)'))];
+}
+
+function renderDPGF(){
+  dpgfUpdateStats();
+  if (!DPGF.length){
+    $('dpgfCard').classList.add('hidden');
+    return;
+  }
+  $('dpgfCard').classList.remove('hidden');
+
+  $('dpgfTypeSel').value = PREFS.dpgfTypeFilter || 'tous';
+  // Sélecteur de feuille
+  const sheets = dpgfSheetNames();
+  if (!sheets.includes(dpgfSheetFilter)) dpgfSheetFilter = '';
+  $('dpgfSheetSel').innerHTML =
+    `<option value="">📑 Toutes les feuilles (${DPGF.length})</option>` +
+    sheets.map(sh => {
+      const n = DPGF.filter(r => (r.sheet || '(sans nom)') === sh).length;
+      return `<option value="${esc(sh)}" ${sh === dpgfSheetFilter ? 'selected' : ''}>${esc(sh)} (${n})</option>`;
+    }).join('');
+
+  const reps = [...new Set(dpgfPool().map(r=> r.repere))].sort();
   const datalist = `<datalist id="repDatalist">${reps.map(r=>`<option value="${esc(r)}">`).join('')}</datalist>`;
 
+  // Lignes visibles (filtre feuille), index d'origine conservé
+  const visible = [];
+  DPGF.forEach((r, i) => {
+    if (!dpgfSheetFilter || (r.sheet || '(sans nom)') === dpgfSheetFilter) visible.push({ r, i });
+  });
+
+  const limit = dpgfRenderLimit;
+  let rendered = 0;
+  let html = datalist;
+
   if (dpgfView === 'continue'){
-    $('dpgfRows').innerHTML = datalist + HDR +
-      DPGF.map((r,i)=>{
-        const withSrc = {...r, descriptif: `[${r.sheet||'?'}] ${r.descriptif}`};
-        return buildRow(withSrc, i);
-      }).join('');
+    html += DPGF_HDR;
+    for (const {r, i} of visible) {
+      if (rendered >= limit) break;
+      html += buildDpgfRow(r, i);
+      rendered++;
+    }
   } else {
     const groups = {};
-    DPGF.forEach((r,i)=>{
+    visible.forEach(({r, i})=>{
       const k = r.sheet || '(sans nom)';
       (groups[k] = groups[k] || []).push({r, i});
     });
-    $('dpgfRows').innerHTML = datalist + Object.entries(groups).map(([sheet, rows]) => {
+    for (const [sheet, rows] of Object.entries(groups)) {
+      if (rendered >= limit) break;
       const okCnt = rows.filter(x=> x.r.prix > 0).length;
-      return `
+      html += `
         <div class="dpgf-section-hdr">
           📑 ${esc(sheet)}
           <span class="badge badge-bleu">${rows.length} lignes</span>
           <span class="badge badge-vert">${okCnt} ok</span>
           <span class="badge badge-rouge">${rows.length - okCnt} à associer</span>
-        </div>
-        ${HDR}
-        ${rows.map(({r, i})=> buildRow(r, i)).join('')}
-      `;
-    }).join('');
+        </div>` + DPGF_HDR;
+      for (const {r, i} of rows) {
+        if (rendered >= limit) break;
+        html += buildDpgfRow(r, i);
+        rendered++;
+      }
+    }
   }
+
+  if (rendered < visible.length) {
+    html += `<div style="text-align:center;padding:12px">
+      <button class="btn btn-gris" onclick="dpgfRenderLimit+=1000;renderDPGF()">⬇ Afficher 1000 lignes de plus (${visible.length - rendered} restantes)</button>
+      <button class="btn btn-gris" onclick="dpgfRenderLimit=Infinity;renderDPGF()">Tout afficher</button>
+    </div>`;
+  }
+  $('dpgfRows').innerHTML = html;
 }
 
 function onDpgfRepInline(i, val){
   const r = DPGF[i];
   r.repere = val.trim();
   if (r.repere){
-    const matchs = BASE.filter(b=> b.repere === r.repere);
+    const matchs = dpgfPool().filter(b=> b.repere === r.repere);
     if (matchs.length){
       const prix = matchs.map(m=> m.prix);
       const moy  = prix.reduce((a,b)=> a+b, 0) / prix.length;
       r.prix = (r.mode==='ratio' && prix.length>1) ? moy : prix[prix.length-1];
       r.total = r.prix * (r.qte || 1);
+      delete r.ia; // prix repris à la main → l'hypothèse IA ne s'applique plus
     }
-  } else { r.prix = 0; r.total = 0; }
-  renderDPGF();
+  } else { r.prix = 0; r.total = 0; delete r.ia; }
+  dpgfUpdateRow(i);
 }
 function onDpgfPrixInline(i, val){
   const v = parseFloat(val) || 0;
   DPGF[i].prix = v;
   DPGF[i].total = v * (DPGF[i].qte || 1);
-  renderDPGF();
+  delete DPGF[i].ia;
+  dpgfUpdateRow(i);
 }
 function setDpgfMode(i, mode){
   DPGF[i].mode = mode;
   if (DPGF[i].repere) onDpgfRepInline(i, DPGF[i].repere);
-  else renderDPGF();
+  else dpgfUpdateRow(i);
 }
 
 document.querySelectorAll('#viewToggle button').forEach(b=>{
@@ -2089,6 +2767,7 @@ document.querySelectorAll('#viewToggle button').forEach(b=>{
     document.querySelectorAll('#viewToggle button').forEach(x=> x.classList.remove('on'));
     b.classList.add('on');
     dpgfView = b.dataset.view;
+    dpgfRenderLimit = DPGF_PAGE_SIZE;
     renderDPGF();
   });
 });
@@ -2127,7 +2806,7 @@ function similarity(a, b) {
 }
 function findSuggestions(descriptifDPGF, lot) {
   const grouped = {};
-  BASE.forEach(r => {
+  dpgfPool().forEach(r => {
     if (!grouped[r.repere]) grouped[r.repere] = {rep: r.repere, lot: r.lot, desg: r.designation, prix: []};
     grouped[r.repere].prix.push(r.prix);
   });
@@ -2145,6 +2824,7 @@ function openSel(idx){ gIdx = idx; openSelRow(idx, ()=> renderDPGF()); }
 
 function openSelRow(idx, cb){
   gCb = cb; gSel = {}; gSelHisto = null;
+  _selGroupedCache = null; // ★ v2.6.2 : regroupement reconstruit une fois par ouverture
   const row = DPGF[idx];
   $('selTitle').textContent = `Ligne ${idx+1}/${DPGF.length} — Sélection du repère`;
   $('selDPGF').innerHTML =
@@ -2161,11 +2841,20 @@ function openSelRow(idx, cb){
   filtrerRep();
   openModal('modalSel', 'selSearch');
 }
-function filtrerRep(){
-  const srch = ($('selSearch').value||'').toLowerCase();
-  const lot  = $('selLot').value;
+/* ★ v2.6.2 perf — le regroupement complet de la base était refait à CHAQUE
+   frappe dans la recherche de la modale. Il est maintenant construit une fois
+   par ouverture (cache invalidé si le filtre de type change), la recherche est
+   debouncée et l'affichage plafonné. */
+let _selGroupedCache = null;
+let _selFiltreTimer = null;
+const SEL_MAX_ITEMS = 250;
+function filtrerRepDebounced(){
+  clearTimeout(_selFiltreTimer);
+  _selFiltreTimer = setTimeout(filtrerRep, 150);
+}
+function buildSelGrouped(){
   const grouped = {};
-  BASE.forEach(r=>{
+  dpgfPool().forEach(r=>{
     if (!grouped[r.repere])
       grouped[r.repere] = {rep:r.repere, lot:r.lot, desg:r.designation, unite:r.unite, prix:[], prixAll:[]};
     grouped[r.repere].prixAll.push(r.prix);
@@ -2176,6 +2865,13 @@ function filtrerRep(){
   Object.values(grouped).forEach(g => {
     if (g.prix.length === 0) g.prix = g.prixAll;
   });
+  return grouped;
+}
+function filtrerRep(){
+  const srch = ($('selSearch').value||'').toLowerCase();
+  const lot  = $('selLot').value;
+  if (!_selGroupedCache) _selGroupedCache = buildSelGrouped();
+  const grouped = _selGroupedCache;
   let items = Object.values(grouped).filter(r =>
     (!lot || r.lot===lot) &&
     (!srch || r.rep.toLowerCase().includes(srch) || r.desg.toLowerCase().includes(srch)));
@@ -2188,7 +2884,11 @@ function filtrerRep(){
     if (bi >= 0) return 1;
     return a.rep.localeCompare(b.rep);
   });
-  $('repNb').textContent = items.length + ' repère(s)' + (suggs.length ? ' · ⭐ Suggestions en premier' : '');
+  const totalItems = items.length;
+  items = items.slice(0, SEL_MAX_ITEMS);
+  $('repNb').textContent = totalItems + ' repère(s)' +
+    (totalItems > items.length ? ` · ${items.length} premiers affichés — affinez la recherche` : '') +
+    (suggs.length ? ' · ⭐ Suggestions en premier' : '');
   $('repList').innerHTML = items.map((r,i)=>{
     const moy  = r.prix.reduce((a,b)=> a+b, 0) / r.prix.length;
     const dern = r.prix[r.prix.length-1];
@@ -2217,7 +2917,7 @@ function selRep(i, rep, moy, dernier, cnt, unite){
   const el = $('ri'+i); if (el) el.classList.add('sel');
   gSel = {rep, moy, dernier, cnt, unite};
   gSelHisto = null;
-  const matchs = BASE.map((b, idx) => ({b, idx})).filter(x => x.b.repere === rep);
+  const matchs = dpgfPool().map((b, idx) => ({b, idx})).filter(x => x.b.repere === rep);
   $('histoList').innerHTML = matchs.map((x, hi) => `
     <div class="histo-item" id="hi${hi}" data-prix="${x.b.prix}" data-idx="${x.idx}">
       <span>${esc(x.b.date) || '—'}</span>
@@ -2266,8 +2966,9 @@ function validerRep(){
   DPGF[gIdx].prix   = val;
   DPGF[gIdx].mode   = (mode === 'ratio') ? 'ratio' : 'exact';
   DPGF[gIdx].total  = val * (DPGF[gIdx].qte || 1);
+  delete DPGF[gIdx].ia;
   closeModal('modalSel');
-  renderDPGF();
+  dpgfUpdateRow(gIdx); // ★ v2.7 perf : plus de re-rendu complet
   if (gCb) gCb();
 }
 function ignorer(){ closeModal('modalSel'); if (gCb) gCb(); }
@@ -2296,8 +2997,9 @@ function isRowValid(r){
   return r.repere.trim() && r.lot && r.designation.trim() && parseFloat(r.prix) > 0;
 }
 function isMasseAnomaly(r) {
+  const masseType = $('masseTypeSel') ? $('masseTypeSel').value : 'nc';
   if (!r.repere.trim() || !parseFloat(r.prix)) return false;
-  const matchs = BASE.filter(b => b.repere === r.repere.trim());
+  const matchs = BASE.filter(b => b.repere === r.repere.trim() && normTypePrix(b) === masseType);
   if (matchs.length < 2) return false;
   const prixs = matchs.map(b => b.prix);
   const min = Math.min(...prixs), max = Math.max(...prixs);
@@ -2408,8 +3110,10 @@ async function validerMasse() {
   if (!confirm(`Importer ${valides.length} ligne${valides.length > 1 ? 's' : ''} dans la base ?`)) return;
   await snapshotIfImportant('Avant saisie masse');
   pushUndo(`Saisie masse (${valides.length} prix)`);
+  const typeSel = $('masseTypeSel') ? $('masseTypeSel').value : 'nc';
   valides.forEach(r => {
-    BASE.push({
+    const obj = {
+      id: genId(),
       repere: r.repere.trim(),
       lot: r.lot,
       designation: r.designation.trim(),
@@ -2417,7 +3121,9 @@ async function validerMasse() {
       prix: parseFloat(r.prix),
       date: r.date,
       projet: r.projet.trim()
-    });
+    };
+    if (typeSel !== 'nc') obj.typePrix = typeSel;
+    BASE.push(obj);
   });
   // Ne garder que les invalides
   MASSE = MASSE.filter(r => !isRowValid(r));
@@ -2539,9 +3245,20 @@ async function importerTrameMasse() {
 /* ============================================================
    ★ v2.4 ★ RATIOS — avec lignes expansibles + sparkline
    ============================================================ */
+function setRatioTypeFilter(v){
+  PREFS.ratioTypeFilter = v;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  renderRatios();
+}
+
 function renderRatios(){
+  const ts = $('ratioTypeSel'); if (ts) ts.value = PREFS.ratioTypeFilter || 'tous';
+  const bn = $('btnNewCustomRatio'); if (bn) bn.style.display = window.RATIO_VIEW === 'perso' ? '' : 'none';
+  // ★ v2.6 — vues "par type d'ouvrage" et "mes ratios" : voir renderer/ratios-plus.js
+  if (window.RATIO_VIEW === 'types' && typeof renderRatiosTypes === 'function') { renderRatiosTypes(); return; }
+  if (window.RATIO_VIEW === 'perso' && typeof renderRatiosPerso === 'function') { renderRatiosPerso(); return; }
   const grouped = {};
-  BASE.forEach(r => {
+  ratioPool().forEach(r => {
     if (!grouped[r.repere]) grouped[r.repere] = {
       rep: r.repere, lot: r.lot, desg: r.designation, unite: r.unite, items: []
     };
@@ -2973,6 +3690,8 @@ async function relinkExcel() {
    ★ v2.3 ★ SYNC AVEC DÉTECTION DE CONFLIT
    ============================================================ */
 function scheduleSync(){
+  // ★ v2.6 — liaison Google Sheets : sync ligne à ligne dédiée
+  if (typeof gsScheduleSync === 'function') gsScheduleSync();
   if (!linkedExcelPath || !PREFS.autoSync) return;
   // Debounce pour éviter les sync en rafale
   clearTimeout(syncDebounce);
@@ -3624,7 +4343,8 @@ async function loadDPGF() {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = ev => {
-        const wb = XLSX.read(ev.target.result, {type:'array'});
+        const wb = XLSX.read(ev.target.result, {type:'array', cellStyles:true, bookVBA:true});
+        dpgfSrcName = file.name;
         processDPGFwb(wb);
       };
       reader.readAsArrayBuffer(file);
@@ -3635,7 +4355,9 @@ async function loadDPGF() {
   const f = await window.electronAPI.openFile([{name:'Excel', extensions:['xlsx','xlsm']}]);
   if (!f) return;
   try {
-    const wb = XLSX.read(f.data, {type:'base64'});
+    // ★ v2.7.2 : cellStyles/bookVBA pour ré-exporter dans la mise en forme d'origine
+    const wb = XLSX.read(f.data, {type:'base64', cellStyles:true, bookVBA:true});
+    dpgfSrcName = f.path.split(/[\\\/]/).pop();
     processDPGFwb(wb);
   } catch (e) {
     toast('Erreur lecture : ' + e.message, 'rouge', 4000);
@@ -3669,10 +4391,19 @@ function processDPGFwb(wb) {
       const repIdx  = r.findIndex(c => /^(rep[eè]re|rep|n°\s*art|num[eé]ro?|n°|art|ref|article|code|item|poste)\.?$/i.test(c));
       const descIdx = r.findIndex(c => /(d[eé]sign|descript|libell|article|nature|prestation|ouvrage|d[eé]nomination)/i.test(c));
       const uIdx    = r.findIndex(c => /^(u|unit[eé]?s?|un|um)\.?$/i.test(c));
-      const qteIdx  = r.findIndex(c => /^(qt[eé]?s?|quant.*|nombre|nb)\.?$/i.test(c));
-      const prixIdx = r.findIndex(c => /(prix\s*unit|prix|pu|p\.u|tarif|montant)/i.test(c) && !/total|h\.?t|ttc|produit/i.test(c));
+      // ★ v2.6.3 : reconnaît aussi "Q", "Q MOE", "Q ENT", "Qté", "Quantités"…
+      const qteIdx  = r.findIndex(c => /^(qt[eé]?s?\.?|quant\S*|nombre|nb\.?|q)(\s.*)?$/i.test(c));
+      // ★ v2.6.3 fix : "PRIX UNITAIRE H.T." était REJETÉ par l'exclusion h.t →
+      // aucune colonne prix trouvée → 0 ligne importée. On cherche d'abord un
+      // vrai "prix unitaire / PU" (HT/TTC acceptés), sinon un "prix/tarif"
+      // qui n'est pas un total/montant.
+      let prixIdx = r.findIndex(c => /p\.?\s*u\b|prix\s*unit/i.test(c) && !/total|montant/i.test(c));
+      if (prixIdx < 0) prixIdx = r.findIndex(c => /(prix|tarif)/i.test(c) && !/total|montant|produit/i.test(c));
 
-      if (descIdx >= 0 && (repIdx >= 0 || uIdx >= 0 || qteIdx >= 0)) {
+      // ★ v2.6.3 : au moins 2 marqueurs (repère/unité/qté/prix) en plus de la
+      // désignation, pour ne pas prendre une feuille de récap pour une DPGF
+      const nbMarqueurs = [repIdx, uIdx, qteIdx, prixIdx].filter(x => x >= 0).length;
+      if (descIdx >= 0 && nbMarqueurs >= 2) {
         headerRow = i;
         cols.rep = repIdx;
         cols.u = uIdx;
@@ -3782,6 +4513,9 @@ function confirmSheets() {
 
 function importDPGFSheets() {
   DPGF = [];
+  dpgfRenderLimit = DPGF_PAGE_SIZE;
+  dpgfSheetCols = {};
+  dpgfSheetFilter = '';
   let totalSheets = 0, nbForced = 0;
 
   detectedSheets.filter(s => s.checked).forEach(s => {
@@ -3818,6 +4552,7 @@ function importDPGFSheets() {
       }
     }
     if (headerRow < 0 || !cols || cols.descStart < 0) return;
+    dpgfSheetCols[s.name] = cols; // ★ v2.7.2 : mémorisé pour l'export à l'identique
 
     const rows = XLSX.utils.sheet_to_json(s.ws, {header:1, defval:''});
 
@@ -3855,9 +4590,15 @@ function importDPGFSheets() {
 
       // Lire les autres champs
       const uniteVal = cols.u >= 0 ? String(r[cols.u]||'').trim() : '';
-      const qteVal   = cols.qte >= 0 ? parseFloat(String(r[cols.qte]||'').replace(',','.')) : NaN;
-      const prixVal  = cols.prix >= 0 ? parseFloat(String(r[cols.prix]||'').replace(',','.')) : NaN;
+      const qteVal   = cols.qte >= 0 ? parseFloat(String(r[cols.qte]||'').replace(/\s/g,'').replace(',','.')) : NaN;
+      const prixVal  = cols.prix >= 0 ? parseFloat(String(r[cols.prix]||'').replace(/\s/g,'').replace(',','.')) : NaN;
       const hasPrice = !isNaN(prixVal) && prixVal > 0;
+      // ★ v2.6.3 fix : une DPGF à chiffrer a sa colonne prix VIDE — exiger un
+      // prix pour reconnaître un article donnait 0 ligne. Un article se
+      // reconnaît par : unité OU quantité OU prix renseigné (un titre de
+      // chapitre n'a ni unité ni quantité).
+      const hasQte  = !isNaN(qteVal) && qteVal > 0;
+      const hasData = hasPrice || hasQte || (uniteVal !== '' && uniteVal.length <= 12);
 
       // === FILTRES ===
       // Lignes vides
@@ -3869,12 +4610,14 @@ function importDPGFSheets() {
 
       // === LOGIQUE PARENT/ENFANT ===
 
-      // CAS A : Ligne avec REPÈRE + TITRE + PRIX → article simple
-      if (repereVal && titreVal && hasPrice) {
+      // CAS A : Ligne avec REPÈRE + TITRE + DONNÉES (unité/qté/prix) → article
+      // (★ v2.6.3 : avant, seul un PRIX déjà renseigné comptait — une DPGF
+      //  vierge à chiffrer donnait donc 0 ligne)
+      if (repereVal && titreVal && hasData) {
         DPGF.push({
-          sheet: s.name,
+          sheet: s.name, srcRow: i,
           repDPGF: repereVal,
-          descriptif: titreVal,
+          descriptif: titreVal + (detailVal ? ' - ' + detailVal : ''),
           unite: uniteVal,
           qte: isNaN(qteVal) ? 0 : qteVal,
           repere: '', prix: 0, total: 0, mode: 'exact'
@@ -3883,9 +4626,9 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS B : Ligne avec REPÈRE + TITRE mais SANS prix → c'est un PARENT (titre d'article)
+      // CAS B : Ligne avec REPÈRE + TITRE mais SANS données → c'est un PARENT (titre d'article)
       // Par exemple : "2.1.2 | Clôture de chantier" puis ses 4 sous-items en-dessous
-      if (repereVal && titreVal && !hasPrice) {
+      if (repereVal && titreVal && !hasData) {
         // Vérifier si c'est une ligne de section (genre "2.1 TRAVAUX PREPARATOIRES")
         // Ces lignes ont typiquement un repère court (1-2 niveaux) + texte en majuscules
         const isSection = (
@@ -3902,10 +4645,10 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS C : Ligne SANS repère mais avec un DÉTAIL + un PRIX → sous-item du parent courant
-      if (!repereVal && detailVal && hasPrice && currentParent) {
+      // CAS C : Ligne SANS repère mais avec un DÉTAIL + des données → sous-item du parent courant
+      if (!repereVal && detailVal && hasData && currentParent) {
         DPGF.push({
-          sheet: s.name,
+          sheet: s.name, srcRow: i,
           repDPGF: currentParent.repere,
           descriptif: `${currentParent.titre} - ${detailVal}`,
           unite: uniteVal,
@@ -3915,14 +4658,17 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS D : Ligne SANS repère mais avec un TITRE (descStart) + un PRIX
-      // → cas où on voit un titre directement avec son prix sans repère explicite
-      // → on prend le titre comme désignation et on hérite du repère parent (s'il y en a un)
-      if (!repereVal && titreVal && hasPrice && currentParent) {
+      // CAS D : Ligne SANS repère mais avec un TITRE (descStart) + des données
+      // → hérite du parent s'il existe ; sinon article autonome
+      // (★ v2.6.3 : les feuilles SANS colonne repère tombaient toutes ici sans
+      //  jamais avoir de parent → 0 ligne. On importe maintenant sans parent.)
+      if (!repereVal && titreVal && hasData) {
         DPGF.push({
-          sheet: s.name,
-          repDPGF: currentParent.repere,
-          descriptif: `${currentParent.titre} - ${titreVal}${detailVal ? ' ' + detailVal : ''}`,
+          sheet: s.name, srcRow: i,
+          repDPGF: currentParent ? currentParent.repere : '',
+          descriptif: currentParent
+            ? `${currentParent.titre} - ${titreVal}${detailVal ? ' ' + detailVal : ''}`
+            : titreVal + (detailVal ? ' - ' + detailVal : ''),
           unite: uniteVal,
           qte: isNaN(qteVal) ? 0 : qteVal,
           repere: '', prix: 0, total: 0, mode: 'exact'
@@ -3940,11 +4686,72 @@ function importDPGFSheets() {
   initUI(); showPage('dpgf');
   let msg = `📥 ${DPGF.length} ligne(s) importée(s) depuis ${totalSheets} feuille(s)`;
   if (nbForced) msg += ` (dont ${nbForced} en détection manuelle)`;
-  toast(msg, 'vert', 4000);
+  if (DPGF.length === 0 && totalSheets > 0) {
+    // ★ v2.6.3 : diagnostic quand rien ne sort malgré des feuilles cochées
+    console.warn('[DPGF] 0 ligne importée. Diagnostic par feuille :');
+    detectedSheets.filter(x => x.checked).forEach(x =>
+      console.warn(`  - "${x.name}" : en-tête ligne ${x.headerRow + 1}, colonnes`, x.cols));
+    toast('⚠️ Feuilles lues mais aucune ligne exploitable — ouvrez la console (Ctrl+Maj+I) et envoyez le diagnostic [DPGF]', 'orange', 7000);
+  } else {
+    toast(msg, 'vert', 4000);
+  }
 }
 
+/* ★ v2.7.2 — Export DPGF dans le CLASSEUR D'ORIGINE : mêmes feuilles, mêmes
+   styles, fusions et formules — la SEULE modification est l'écriture des prix
+   unitaires dans la colonne PU des lignes chiffrées. */
 async function exportDPGF() {
   if (!DPGF.length) { toast('Aucune DPGF', 'rouge'); return; }
+
+  if (pendingDPGFwb && DPGF.some(r => r.srcRow !== undefined)) {
+    let nb = 0;
+    const skippedSheets = new Set();
+    DPGF.forEach(r => {
+      if (!(r.prix > 0) || r.srcRow === undefined) return;
+      const cols = dpgfSheetCols[r.sheet];
+      const ws = pendingDPGFwb.Sheets[r.sheet];
+      if (!ws || !cols || cols.prix < 0) { skippedSheets.add(r.sheet); return; }
+      const addr = XLSX.utils.encode_cell({ r: r.srcRow, c: cols.prix });
+      const cell = ws[addr] || {};
+      delete cell.f; delete cell.w; // remplace une éventuelle formule/valeur affichée
+      cell.t = 'n';
+      cell.v = Math.round(r.prix * 100) / 100;
+      ws[addr] = cell;
+      // Étendre la plage de la feuille si besoin
+      try {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        if (r.srcRow > range.e.r) range.e.r = r.srcRow;
+        if (cols.prix > range.e.c) range.e.c = cols.prix;
+        ws['!ref'] = XLSX.utils.encode_range(range);
+      } catch (e) {}
+      nb++;
+    });
+    if (nb === 0) { toast('Aucune ligne chiffrée à écrire', 'orange'); return; }
+
+    const isXlsm = /\.xlsm$/i.test(dpgfSrcName);
+    const out = XLSX.write(pendingDPGFwb, { bookType: isXlsm ? 'xlsm' : 'xlsx', type: 'base64', cellStyles: true });
+    const base = (dpgfSrcName || 'DPGF').replace(/\.(xlsx|xlsm)$/i, '');
+    const fname = `${base}_CHIFFREE.${isXlsm ? 'xlsm' : 'xlsx'}`;
+    if (isElectron) {
+      const p = await window.electronAPI.saveFile({ defaultName: fname,
+        filters: [{ name: 'Excel', extensions: [isXlsm ? 'xlsm' : 'xlsx'] }], data: out });
+      if (p) toast(`✅ ${nb} prix écrits dans le classeur d'origine : ${p.split(/[\\\/]/).pop()}`, 'vert', 4500);
+    } else {
+      toast('Export à l\'identique disponible uniquement dans l\'app Electron', 'orange');
+    }
+    if (skippedSheets.size) {
+      toast(`⚠️ Feuille(s) sans colonne prix détectée, non remplies : ${[...skippedSheets].join(', ')}`, 'orange', 6000);
+    }
+    return;
+  }
+
+  // Repli (classeur d'origine plus en mémoire, ex. après redémarrage) :
+  // export tableau récapitulatif + invitation à recharger le fichier
+  toast('ℹ️ Classeur d\'origine non disponible (rechargez la DPGF pour un export à l\'identique) — export récapitulatif', 'bleu', 5000);
+  await exportDPGFTableau();
+}
+
+async function exportDPGFTableau() {
   const wb = XLSX.utils.book_new();
   const data = [
     ['DPGF complétée'], [`Date : ${new Date().toLocaleDateString('fr-FR')}`], [],
@@ -4533,14 +5340,21 @@ async function checkUpdatesNow() {
 function setupQuitHandler() {
   if (!isElectron || !window.electronAPI.onBeforeQuit) return;
   window.electronAPI.onBeforeQuit(() => {
+    // ★ v2.6.2 — vider l'écriture localStorage différée avant de fermer
+    persistBaseNow();
+    // ★ v2.6 — modifs Google Sheets non poussées ?
+    const gsPending = (typeof gsCountPending === 'function') ? gsCountPending() : 0;
     // Si pas de modifs non syncées, on ferme directement
-    if (!linkedExcelPath || dirtyChanges.length === 0) {
+    if ((!linkedExcelPath || dirtyChanges.length === 0) && gsPending === 0) {
       window.electronAPI.confirmQuit();
       return;
     }
     // Sinon ouvrir la modale
-    $('quitMsg').innerHTML = `Vous avez des modifications non synchronisées avec le fichier officiel.<br>
-      <code style="font-size:10px;color:#666">${esc(linkedExcelPath.split(/[\\\/]/).pop())}</code>`;
+    const target = gsPending > 0 && (typeof GS !== 'undefined') && GS
+      ? `Feuille Google Sheets « ${GS.spreadsheetTitle || ''} »`
+      : (linkedExcelPath || '').split(/[\\\/]/).pop();
+    $('quitMsg').innerHTML = `Vous avez des modifications non synchronisées.<br>
+      <code style="font-size:10px;color:#666">${esc(target)}</code>`;
     document.querySelector('input[name="quitChoice"][value="sync"]').checked = true;
     openModal('modalQuit');
   });
@@ -4553,7 +5367,8 @@ async function confirmQuitChoice() {
   if (choice === 'sync') {
     toast('🔄 Synchronisation en cours...', 'bleu', 2000);
     try {
-      await syncToExcel(true);
+      // ★ v2.6 — forceSync route vers Google Sheets ou Excel selon la liaison
+      await forceSync();
     } catch (e) { console.error(e); }
   }
   // Fermer (avec ou sans sync)
@@ -4585,6 +5400,16 @@ function setupDragDrop() {
     dragCount = 0;
     $('dropOverlay').classList.remove('show');
     if (!e.dataTransfer.files.length) return;
+    // ★ v2.6 — routage Import IA : les PDF vont toujours à l'import IA ;
+    // si la page Import IA est active, les Excel/CSV déposés y vont aussi.
+    const allFiles = [...e.dataTransfer.files];
+    const iaPageActive = $('page-importia') && $('page-importia').classList.contains('active');
+    const iaFiles = allFiles.filter(f => /\.pdf$/i.test(f.name) ||
+      (iaPageActive && /\.(xlsx|xlsm|xls|csv)$/i.test(f.name)));
+    if (iaFiles.length && typeof iaAddDroppedFiles === 'function') {
+      iaAddDroppedFiles(iaFiles);
+      return;
+    }
     const file = e.dataTransfer.files[0];
     const name = file.name.toLowerCase();
     if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
@@ -4592,6 +5417,7 @@ function setupDragDrop() {
       const what = confirm(`Fichier détecté : ${file.name}\n\nOK pour LIER comme base de prix\nAnnuler pour importer comme DPGF`);
       const reader = new FileReader();
       reader.onload = async ev => {
+        dpgfSrcName = file.name;
         if (what) {
           // Lier (charger en mémoire et déclencher le flux de lien)
           const arr = new Uint8Array(ev.target.result);
@@ -4605,7 +5431,7 @@ function setupDragDrop() {
             toast('Pour lier, cliquez sur le bouton « Lier fichier Excel »', 'orange', 4000);
           }
         } else {
-          const wb = XLSX.read(ev.target.result, {type:'array'});
+          const wb = XLSX.read(ev.target.result, {type:'array', cellStyles:true, bookVBA:true});
           processDPGFwb(wb);
         }
       };
@@ -4740,7 +5566,9 @@ async function bootstrap() {
 
   // Kebab + boutons
   setupKebab();
-  $('btnLinkMain').addEventListener('click', linkExcel);
+  // ★ v2.6 — le bouton propose Excel OU Google Sheets
+  $('btnLinkMain').addEventListener('click', () =>
+    (typeof openLinkTypeChooser === 'function') ? openLinkTypeChooser() : linkExcel());
   $('btnExportStandalone').addEventListener('click', exportStandalone);
   $('fileDPGFBtn').addEventListener('click', loadDPGF);
 
@@ -4791,5 +5619,10 @@ async function bootstrap() {
 window.addEventListener('DOMContentLoaded', bootstrap);
 
 </script>
+<!-- ★ v2.6 — modules complémentaires (même portée globale que le script principal) -->
+<script src="renderer/import-ia.js"></script>
+<script src="renderer/gsheets-ui.js"></script>
+<script src="renderer/ratios-plus.js"></script>
+<script src="renderer/chiffrage.js"></script>
 </body>
 </html>

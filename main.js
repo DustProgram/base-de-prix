@@ -1,8 +1,11 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron')
 const path   = require('path')
 const fs     = require('fs')
 const crypto = require('crypto')
 const { autoUpdater } = require('electron-updater')
+const { createSecretStore } = require('./lib/secrets')
+const { PROVIDERS, extractPrices, chiffrerLignes } = require('./lib/ai')
+const { createGSheets } = require('./lib/gsheets')
 
 let win
 let allowQuit = false
@@ -308,3 +311,116 @@ ipcMain.handle('check-for-updates', async () => {
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())
+
+/* ============================================================
+   ★ v2.6 ★ SECRETS (clé API Claude, identifiants Google)
+   Stockés chiffrés via safeStorage. Le renderer peut écrire un
+   secret et savoir s'il existe, jamais le relire.
+   ============================================================ */
+const secrets = createSecretStore(app, safeStorage)
+
+ipcMain.handle('secret-set', async (e, { name, value }) => {
+  try {
+    if (!secrets.isAllowed(name)) return { success: false, error: 'Secret non autorisé' }
+    secrets.set(name, value)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('secret-has', async (e, name) => {
+  try { return secrets.isAllowed(name) && secrets.has(name) } catch (err) { return false }
+})
+
+/* ============================================================
+   ★ v2.6 ★ IMPORT IA — extraction de prix via l'API Claude
+   ============================================================ */
+ipcMain.handle('open-files', async (e, filters) => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choisir des fichiers',
+    filters: filters || [{ name: 'Documents', extensions: ['pdf', 'xlsx', 'xlsm', 'xls', 'csv'] }],
+    properties: ['openFile', 'multiSelections']
+  })
+  restoreFocus()
+  if (result.canceled || !result.filePaths.length) return []
+  return result.filePaths
+})
+
+// ★ v2.7 — résout le fournisseur choisi et sa clé chiffrée
+function resolveProvider(provider) {
+  const p = PROVIDERS[provider] ? provider : 'claude'
+  const apiKey = secrets.get(PROVIDERS[p].keyName)
+  if (!apiKey) {
+    return { error: `Aucune clé API ${PROVIDERS[p].label} enregistrée. Paramètres → 🤖 IA.` }
+  }
+  return { provider: p, apiKey }
+}
+
+// ★ v2.7.1 — modèle personnalisé (Paramètres) : validé avant usage
+function safeModel(m) {
+  m = String(m || '').trim()
+  return /^[a-zA-Z0-9._\/-]{3,80}$/.test(m) ? m : ''
+}
+
+ipcMain.handle('ia-extract', async (e, { provider, model, kind, filePath, base64, text, filename, lots, hints }) => {
+  try {
+    const rp = resolveProvider(provider)
+    if (rp.error) return { ok: false, error: rp.error }
+    if (kind === 'pdf' && filePath && !base64) {
+      if (!fs.existsSync(filePath)) return { ok: false, error: 'Fichier introuvable : ' + filePath }
+      base64 = fs.readFileSync(filePath).toString('base64')
+    }
+    return await extractPrices({ provider: rp.provider, apiKey: rp.apiKey, model: safeModel(model), kind, base64, text, filename, lots, hints })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ★ v2.7 — chiffrage rapide d'un lot de lignes DPGF
+ipcMain.handle('ia-chiffrage', async (e, { provider, model, lignes, projet }) => {
+  try {
+    const rp = resolveProvider(provider)
+    if (rp.error) return { ok: false, error: rp.error }
+    return await chiffrerLignes({ provider: rp.provider, apiKey: rp.apiKey, model: safeModel(model), lignes, projet })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+/* ============================================================
+   ★ v2.6 ★ GOOGLE SHEETS — OAuth + API
+   ============================================================ */
+const gsheets = createGSheets({ secrets, shell })
+
+function gsHandle(channel, fn) {
+  ipcMain.handle(channel, async (e, args) => {
+    try {
+      const data = await fn(args || {})
+      return { ok: true, ...(data !== undefined ? { data } : {}) }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  })
+}
+
+gsHandle('gs-auth-start',  ()   => gsheets.startAuth())
+gsHandle('gs-auth-status', ()   => gsheets.authStatus())
+gsHandle('gs-auth-logout', ()   => { gsheets.logout() })
+gsHandle('gs-meta',        (a)  => gsheets.getMeta(a.spreadsheetId))
+gsHandle('gs-ensure',      (a)  => gsheets.ensureSheet(a.spreadsheetId, a.title, a.header))
+gsHandle('gs-read',        (a)  => gsheets.readAll(a.spreadsheetId, a.title))
+gsHandle('gs-append',      (a)  => gsheets.appendRows(a.spreadsheetId, a.title, a.rows))
+gsHandle('gs-update',      (a)  => gsheets.updateRows(a.spreadsheetId, a.title, a.updates))
+gsHandle('gs-delete-rows', (a)  => gsheets.deleteRows(a.spreadsheetId, a.sheetId, a.rowNumbers))
+
+// Ouvrir une URL https dans le navigateur (feuille Google, console API…)
+ipcMain.handle('open-url', async (e, url) => {
+  try {
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return { success: false, error: 'URL non autorisée' }
+    await shell.openExternal(url)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})

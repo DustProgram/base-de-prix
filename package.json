@@ -1,17 +1,19 @@
 {
   "name": "base-de-prix",
-  "version": "2.5.3",
+  "version": "2.7.2",
   "description": "Outil de gestion de base de prix et DPGF",
   "main": "main.js",
   "author": "Nathan RAMEDACE",
   "license": "MIT",
   "scripts": {
-    "start":   "electron .",
-    "build":   "electron-builder --win --x64",
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
     "publish": "electron-builder --win --x64 --publish always"
   },
   "dependencies": {
-    "electron-updater": "^6.1.7"
+    "@anthropic-ai/sdk": "^0.127.0",
+    "electron-updater": "^6.1.7",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -27,7 +29,9 @@
       "index.html",
       "main.js",
       "preload.js",
-      "icon.png"
+      "icon.png",
+      "lib/**/*",
+      "renderer/**/*"
     ],
     "publish": [
       {
@@ -39,8 +43,18 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "nsis-web", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis-web",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "icon.png"
     },

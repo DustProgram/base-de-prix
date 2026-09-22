@@ -1,4 +1,251 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.5.3
+# 📋 Base de Prix — Évolutions v2.3 → v2.7.2
+
+## 📑 v2.7.2 — Feuilles DPGF, chiffrage par lot + parallèle, export à l'identique
+
+### 🐛 Fix : navigation entre les feuilles de la DPGF
+
+La pagination v2.7 coupait les feuilles suivantes (« je ne peux plus changer de
+feuille »). Nouveau **sélecteur de feuille** dans la page DPGF : « Toutes les
+feuilles » ou une feuille/lot précise, avec le nombre de lignes par feuille —
+la pagination s'applique dans la feuille choisie.
+
+### ⚡ Chiffrage IA : choix des lots + 3× plus rapide
+
+- **Cases à cocher par feuille/lot** dans la fenêtre de chiffrage (tout / rien /
+  au détail, avec le compte de lignes sans prix par feuille). Si une feuille est
+  filtrée dans la page, elle est pré-sélectionnée seule.
+- **3 lots de 30 lignes envoyés en parallèle** : le temps total est divisé par ~3
+  sur les grosses DPGF (les 4000 lignes du fichier de test : ~45 min → ~15 min)
+
+### 📤 Export DPGF dans la mise en forme d'ORIGINE
+
+L'export réécrit désormais le **classeur Excel d'origine** : mêmes feuilles,
+mêmes styles, fusions, largeurs et formules — la SEULE modification est
+l'écriture des prix unitaires dans la colonne PU des lignes chiffrées.
+
+- Chaque ligne importée mémorise sa feuille + sa ligne source, et la colonne PU
+  détectée par feuille
+- Fichier exporté : `<nom d'origine>_CHIFFREE.xlsx` (ou .xlsm, macros conservées)
+- Validé sur la DPGF réelle : 14 feuilles, prix écrits aux bonnes cellules,
+  cellules témoins et fusions inchangées
+- Si le classeur d'origine n'est plus en mémoire (app relancée) : export
+  récapitulatif de repli + invitation à recharger le fichier
+
+---
+
+## 🔀 v2.7.1 — Modèles IA configurables + bascule automatique (fix Gemini/Mistral)
+
+Retour terrain : Gemini répondait « gemini-2.5-pro n'est plus disponible pour les
+nouveaux utilisateurs » et Mistral « modèle non disponible dans votre palier
+d'abonnement » — 126 lots en erreur.
+
+- **Bascule automatique de modèle** : quand l'API signale un modèle indisponible,
+  l'app retente immédiatement avec le modèle suggéré par l'API (Gemini) ou un
+  modèle du palier accessible (Mistral → `mistral-small-latest`), mémorise ce qui
+  fonctionne (session + Paramètres) et vous prévient une fois
+- **Modèles configurables** : Paramètres → 🤖 IA → « ⚙️ Modèles (avancé) » — un
+  champ par fournisseur (vide = défaut de l'app), validé côté processus principal
+- Défaut Gemini mis à jour : `gemini-3.1-pro-preview` (recommandation Google pour
+  les nouvelles clés)
+- **Chiffrage** : arrêt propre si la même erreur revient sur deux lots consécutifs
+  (fini les 126 erreurs identiques empilées)
+
+---
+
+## ⚡ v2.7.0 — Chiffrage rapide IA, choix du fournisseur (Claude/Gemini/Mistral), page DPGF fluide
+
+### ⚡ Chiffrage rapide IA de la DPGF (avec rapport d'hypothèses)
+
+Nouveau bouton **« ⚡ Chiffrage rapide IA »** dans la page DPGF : l'IA chiffre les
+lignes sans prix (ou toutes, au choix) en s'appuyant **exclusivement sur votre
+base de prix** — jamais sur des prix de marché inventés.
+
+- Pour chaque ligne, l'app présélectionne les meilleurs candidats de la base
+  (similarité) et l'IA choisit la méthode : repère exact, moyenne/ratio,
+  **proratisation dimensionnelle** (ex : porte 147×90 à chiffrer avec des portes
+  200×90 et 150×90 en base → prix au m² moyen × surface cible), extrapolation
+  prudente, ou « non chiffrable »
+- **Rapport d'hypothèses** complet : chaque prix est accompagné de son hypothèse
+  vérifiable en 10 secondes (repères utilisés, dimensions lues, calcul), avec
+  confiance 🟢🟡🔴, résumé par méthode, coût API, copie en un clic
+- Les lignes chiffrées portent un ⚡ (survol = hypothèse) ; toute reprise
+  manuelle efface l'hypothèse ; respect du filtre « Estimer avec »
+  (vente/débours/tous) ; progression par lots de 30 lignes, annulable
+
+### 🔀 Choix du fournisseur IA : Claude, Gemini ou Mistral
+
+Paramètres → 🤖 IA : sélecteur de fournisseur + une clé par service (chiffrées).
+
+- **Claude** (claude-opus-5) — PDF ✅ · **Gemini** (gemini-2.5-pro) — PDF ✅ ·
+  **Mistral** (mistral-large-latest) — PDF ❌ (Excel et chiffrage uniquement,
+  message explicite si on lui donne un PDF)
+- Vaut pour l'**Import IA** ET le **chiffrage rapide** ; sorties JSON validées
+  par schéma avec relance automatique si la réponse est hors format
+
+### 🚀 Page DPGF fluide avec des milliers de lignes
+
+Les boutons E/R et la saisie de prix regénéraient TOUTE la liste (4000+ lignes =
+plusieurs secondes de gel — sans rapport avec la sync Google Sheets, qui ne
+touche pas à la DPGF) :
+
+- Modifier une ligne ne met à jour QUE cette ligne dans la page
+- Rendu paginé par tranches de 300 lignes (+1000 / tout afficher)
+- Nouveau badge Σ total HT de la DPGF dans l'en-tête
+
+---
+
+## 🐛 v2.6.3 — Fix import DPGF « X feuilles, 0 ligne » (validé sur DPGF réelle)
+
+Retour terrain : une DPGF de 14 feuilles était bien détectée mais **0 ligne**
+n'en sortait. Deux causes cumulées, plus deux améliorations :
+
+- **La colonne prix n'était jamais reconnue** quand l'en-tête contenait « H.T. »
+  (« PRIX UNITAIRE H.T. », « PU HT »…) : l'exclusion anti-totaux rejetait `h.t`.
+  Corrigé : « prix unitaire / PU » accepté avec HT/TTC ; seuls total/montant
+  restent exclus.
+- **Une DPGF à chiffrer (colonne prix vide) donnait 0 ligne** : depuis la
+  v2.5.3, une ligne sans prix était classée « titre parent » et jamais importée.
+  Un article est maintenant reconnu par : repère + désignation + (unité OU
+  quantité OU prix). Les feuilles **sans colonne repère** sont aussi importées
+  (avant : tout attendait un parent qui n'existait pas → 0 ligne).
+- **Colonnes quantité « Q », « Q MOE », « Q ENT »** désormais reconnues (en plus
+  de Qté/Quantités/Nb).
+- **Détection plus stricte** : une feuille n'est proposée comme DPGF que si
+  l'en-tête porte au moins 2 marqueurs (repère/unité/qté/prix) en plus de la
+  désignation — les feuilles « Récap » ne sont plus des faux positifs.
+- Si malgré tout 0 ligne sort, un **diagnostic par feuille** est affiché dans la
+  console (Ctrl+Maj+I) pour analyse.
+
+Validé sur la DPGF réelle du retour terrain : 13 feuilles importées,
+**4022 lignes** extraites (unités + quantités), récap TCE écarté.
+
+---
+
+## ⚡ v2.6.2 — Second lot d'optimisations (fluidité durable jusqu'à ~20 000 prix)
+
+- **Undo/redo** : l'état n'est plus copié en profondeur (stringify + parse ×2 par
+  action, ~60 Mo de RAM sur 40 niveaux) mais stocké en une seule chaîne JSON —
+  ~2× moins de travail par action, ~3× moins de mémoire
+- **Sauvegarde** : l'écriture localStorage (~1,5 Mo sérialisés à chaque
+  modification) est différée de 500 ms et regroupée ; écriture forcée à la
+  fermeture de l'application (aucune perte possible)
+- **Google Sheets** : l'« ombre » de sync n'est plus re-parsée depuis
+  localStorage à chaque rafraîchissement du bandeau (cache mémoire)
+- **Modale « Choisir un repère » (DPGF)** : le regroupement complet de la base
+  n'est plus refait à chaque frappe (construit une fois par ouverture),
+  recherche debouncée 150 ms, affichage plafonné à 250 repères
+- **Écran de validation Import IA** : index doublons/anomalies pré-calculés en
+  un passage (au lieu d'un parcours de base par ligne), pagination 300 lignes,
+  écouteur d'édition délégué unique
+- **Compteurs de lots** (sidebar) calculés en un seul passage au lieu de 14
+
+---
+
+## ⚡ v2.6.1 — Performances 4000+ prix, types Débours/Vente, ratios corrigés + personnalisés
+
+### ⚡ Performances (retour terrain : 4631 prix)
+
+Le rendu de « Tous les prix » était quadratique : pour CHAQUE ligne affichée, l'app
+refaisait une recherche complète dans la base (`indexOf` + détection d'anomalie par
+filtre complet), et re-générait tout le tableau à chaque frappe de recherche.
+
+- Filtrage en un seul passage avec index conservé, détection d'anomalie via un
+  index pré-calculé (O(1) par ligne)
+- Recherche « debouncée » (200 ms) : plus de re-rendu à chaque caractère
+- Pagination : 300 lignes affichées, boutons « +1000 » / « Tout afficher »
+- Un seul écouteur d'édition délégué au lieu d'un par cellule
+
+### 🏷 Types de prix : Débours vs Vente
+
+Chaque prix porte désormais un type : **🧾 Débours** (devis sous-traitants, coûts
+chantier) ou **💰 Vente** (DPGF prix client), ou reste « non défini ».
+
+- Choix du type à la saisie (modale, saisie masse, Import IA — débours par défaut)
+- Bouton **« 🏷 Typer le filtre »** dans Tous les prix : reclassement en masse des
+  lignes filtrées (idéal pour typer l'existant par projet/lot)
+- Filtre par type dans Tous les prix + colonne badge V/D triable
+- **Ratios** et **estimation DPGF** calculables au choix sur : tous les prix,
+  vente uniquement, ou débours uniquement (sélecteurs dédiés, mémorisés)
+- Les anomalies ne comparent plus que des prix du même type (un débours face à un
+  prix de vente n'est pas une anomalie, c'est une marge)
+- Colonne « Type » ajoutée à la feuille Google Sheets (migration automatique de
+  l'en-tête ; la première sync après mise à jour re-pousse toutes les lignes)
+
+### 🧩 Ratios auto par type d'ouvrage — regroupement corrigé
+
+Retour terrain : « porte bois » et « porte métallique » étaient regroupées (les mots
+creux « fourniture », « pose »… gonflaient la similarité).
+
+- **Mots creux BTP ignorés** dans le calcul de similarité
+- **Matériaux incompatibles jamais regroupés** (bois ≠ métal ≠ alu ≠ PVC…)
+- **Signatures techniques discriminantes** : C25/30 ≠ C30/37, CEM II ≠ CEM III,
+  XC/XF, DN, diamètres, épaisseurs, EI/CF… Un béton « Ecopact C30/37 CEM III » est
+  classé par sa classe technique, pas par sa marque
+- **Unités normalisées** (m² = M2 = m2, FFT = forfait, PCE = u…) et **jamais
+  mélangées** dans un même groupe (fini les moyennes forfait + m2)
+
+### 🛠 Ratios personnalisés (« Mes ratios »)
+
+Troisième vue dans la page Ratios : créez vos propres regroupements.
+
+- Nom, lot (optionnel), unité (recommandé), **mots-clés de recherche automatique**
+  dans les désignations (ex : `c30/37, cem iii`) et mots-clés d'exclusion
+- Aperçu en direct, exclusion de lignes à la case à cocher, **ajout manuel** de prix
+  précis via recherche — ou ratio 100 % manuel sans mots-clés
+- Alerte « ⚠️ unités mélangées » si le ratio combine des unités différentes
+
+### 🐛 Corrections
+
+- Le titre de « Tous les prix » restait bloqué sur le dernier lot cliqué même en
+  mode « tous les lots »
+- La modification d'un prix (modale ✏️) perdait son identifiant stable, ce que la
+  sync Google Sheets voyait comme une suppression + un ajout
+
+---
+
+## 🚀 v2.6.0 — Import IA, Google Sheets collaboratif, ratios par type d'ouvrage
+
+### 🤖 Import IA (PDF / Excel → base de prix)
+
+Nouveau module **Import IA** (sidebar → Outils) : déposez vos offres de chantier,
+devis ou DPGF chiffrées (PDF, y compris scannés, ou Excel), l'API Claude
+(`claude-opus-5`) en extrait les prix unitaires HT avec projet, date, unité,
+et propose un lot et un repère (similarité avec la base existante).
+
+- File d'attente multi-fichiers, traitement séquentiel, pause/reprise, coût estimé affiché par fichier
+- **Écran de validation obligatoire** avant import : ⚠️ prix anormal vs historique, ♻️ doublon probable, 🔻 confiance faible, édition par double-clic
+- Les Excel sont convertis en texte localement (SheetJS) pour réduire le coût API
+- Clé API saisie dans Paramètres, **stockée chiffrée** (safeStorage/DPAPI), jamais exposée au renderer
+- Glisser-déposer de PDF depuis n'importe quelle page
+
+### 🟩 Liaison Google Sheets (base maître collaborative)
+
+Alternative à la liaison Excel/NAS : une **feuille Google Sheets partagée** devient
+la base maître, éditable par plusieurs utilisateurs en même temps.
+
+- Connexion « Se connecter avec Google » (OAuth 2.0 application de bureau, PKCE, jetons chiffrés localement)
+- Onglet `BASE_PRIX` créé automatiquement avec en-têtes ; chaque ligne porte un **ID stable**, l'auteur et la date de modification
+- **Sync ligne à ligne** (append/update/delete ciblés) au lieu du remplacement de fichier entier : fini les écrasements croisés
+- Fusion à 3 sources (local / feuille / dernier état connu) : les modifs des collègues sont adoptées, les vôtres poussées, les conflits résolus en faveur du local avec avertissement
+- Vérification des modifications externes toutes les 60 s, mode hors-ligne, compteur de modifs en attente dans le bandeau, protection à la fermeture
+- La liaison Excel classique reste disponible (mais exclusive : Excel OU Sheets)
+
+### 🧩 Ratios par type d'ouvrage + tri multi-niveaux
+
+- Page Ratios : nouveau bouton **« Par type d'ouvrage »** — les prix aux désignations
+  similaires (même lot, même unité) sont regroupés automatiquement par similarité
+  textuelle, même avec des repères ou chantiers différents ; moyenne/min/max/médiane/dernier
+  calculés sur le groupe, détail par chantier et par date au clic
+- Page Base : bouton **« Lot › Date › Chantier »** pour trier par lot, puis date (récent d'abord), puis chantier
+
+### 🔧 Technique
+
+- Chaque prix porte désormais un identifiant stable `id` (migration automatique, transparente)
+- Nouveaux modules : `lib/` (processus principal : secrets, API Claude, Google Sheets) et `renderer/`
+- Dépendances : `@anthropic-ai/sdk`, `zod`
+
+---
+
 
 **Date de livraison :** 28 avril 2026
 **Version actuelle :** 2.5.3
