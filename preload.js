@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // === Nouvelles API v2.6 — Import IA (API Claude, exécutée côté main) ===
   openFiles:     (filters)             => ipcRenderer.invoke('open-files', filters),
   iaExtract:     (payload)             => ipcRenderer.invoke('ia-extract', payload),
+  iaChiffrage:   (payload)             => ipcRenderer.invoke('ia-chiffrage', payload),
 
   // === Nouvelles API v2.6 — Google Sheets ===
   gsAuthStart:   ()                    => ipcRenderer.invoke('gs-auth-start'),

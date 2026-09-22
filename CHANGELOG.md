@@ -1,4 +1,46 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.6.3
+# 📋 Base de Prix — Évolutions v2.3 → v2.7.0
+
+## ⚡ v2.7.0 — Chiffrage rapide IA, choix du fournisseur (Claude/Gemini/Mistral), page DPGF fluide
+
+### ⚡ Chiffrage rapide IA de la DPGF (avec rapport d'hypothèses)
+
+Nouveau bouton **« ⚡ Chiffrage rapide IA »** dans la page DPGF : l'IA chiffre les
+lignes sans prix (ou toutes, au choix) en s'appuyant **exclusivement sur votre
+base de prix** — jamais sur des prix de marché inventés.
+
+- Pour chaque ligne, l'app présélectionne les meilleurs candidats de la base
+  (similarité) et l'IA choisit la méthode : repère exact, moyenne/ratio,
+  **proratisation dimensionnelle** (ex : porte 147×90 à chiffrer avec des portes
+  200×90 et 150×90 en base → prix au m² moyen × surface cible), extrapolation
+  prudente, ou « non chiffrable »
+- **Rapport d'hypothèses** complet : chaque prix est accompagné de son hypothèse
+  vérifiable en 10 secondes (repères utilisés, dimensions lues, calcul), avec
+  confiance 🟢🟡🔴, résumé par méthode, coût API, copie en un clic
+- Les lignes chiffrées portent un ⚡ (survol = hypothèse) ; toute reprise
+  manuelle efface l'hypothèse ; respect du filtre « Estimer avec »
+  (vente/débours/tous) ; progression par lots de 30 lignes, annulable
+
+### 🔀 Choix du fournisseur IA : Claude, Gemini ou Mistral
+
+Paramètres → 🤖 IA : sélecteur de fournisseur + une clé par service (chiffrées).
+
+- **Claude** (claude-opus-5) — PDF ✅ · **Gemini** (gemini-2.5-pro) — PDF ✅ ·
+  **Mistral** (mistral-large-latest) — PDF ❌ (Excel et chiffrage uniquement,
+  message explicite si on lui donne un PDF)
+- Vaut pour l'**Import IA** ET le **chiffrage rapide** ; sorties JSON validées
+  par schéma avec relance automatique si la réponse est hors format
+
+### 🚀 Page DPGF fluide avec des milliers de lignes
+
+Les boutons E/R et la saisie de prix regénéraient TOUTE la liste (4000+ lignes =
+plusieurs secondes de gel — sans rapport avec la sync Google Sheets, qui ne
+touche pas à la DPGF) :
+
+- Modifier une ligne ne met à jour QUE cette ligne dans la page
+- Rendu paginé par tranches de 300 lignes (+1000 / tout afficher)
+- Nouveau badge Σ total HT de la DPGF dans l'en-tête
+
+---
 
 ## 🐛 v2.6.3 — Fix import DPGF « X feuilles, 0 ligne » (validé sur DPGF réelle)
 

@@ -4,7 +4,7 @@ const fs     = require('fs')
 const crypto = require('crypto')
 const { autoUpdater } = require('electron-updater')
 const { createSecretStore } = require('./lib/secrets')
-const { extractPrices } = require('./lib/claude')
+const { PROVIDERS, extractPrices, chiffrerLignes } = require('./lib/ai')
 const { createGSheets } = require('./lib/gsheets')
 
 let win
@@ -347,15 +347,36 @@ ipcMain.handle('open-files', async (e, filters) => {
   return result.filePaths
 })
 
-ipcMain.handle('ia-extract', async (e, { kind, filePath, base64, text, filename, lots, hints }) => {
+// ★ v2.7 — résout le fournisseur choisi et sa clé chiffrée
+function resolveProvider(provider) {
+  const p = PROVIDERS[provider] ? provider : 'claude'
+  const apiKey = secrets.get(PROVIDERS[p].keyName)
+  if (!apiKey) {
+    return { error: `Aucune clé API ${PROVIDERS[p].label} enregistrée. Paramètres → 🤖 IA.` }
+  }
+  return { provider: p, apiKey }
+}
+
+ipcMain.handle('ia-extract', async (e, { provider, kind, filePath, base64, text, filename, lots, hints }) => {
   try {
-    const apiKey = secrets.get('anthropic_api_key')
-    if (!apiKey) return { ok: false, error: 'Aucune clé API Claude enregistrée. Paramètres → Import IA.' }
+    const rp = resolveProvider(provider)
+    if (rp.error) return { ok: false, error: rp.error }
     if (kind === 'pdf' && filePath && !base64) {
       if (!fs.existsSync(filePath)) return { ok: false, error: 'Fichier introuvable : ' + filePath }
       base64 = fs.readFileSync(filePath).toString('base64')
     }
-    return await extractPrices({ apiKey, kind, base64, text, filename, lots, hints })
+    return await extractPrices({ provider: rp.provider, apiKey: rp.apiKey, kind, base64, text, filename, lots, hints })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ★ v2.7 — chiffrage rapide d'un lot de lignes DPGF
+ipcMain.handle('ia-chiffrage', async (e, { provider, lignes, projet }) => {
+  try {
+    const rp = resolveProvider(provider)
+    if (rp.error) return { ok: false, error: rp.error }
+    return await chiffrerLignes({ provider: rp.provider, apiKey: rp.apiKey, lignes, projet })
   } catch (err) {
     return { ok: false, error: err.message }
   }

@@ -27,32 +27,61 @@ function openExternalUrl(url) {
   else window.open(url, '_blank');
 }
 
-/* ── Paramètres : clé API ── */
-async function saveApiKey() {
-  const v = $('prefApiKey').value.trim();
+/* ── Paramètres : fournisseur IA + clés API ── */
+const IA_PROVIDERS = {
+  claude:  { label: 'Claude',  keyName: 'anthropic_api_key', input: 'prefApiKey',      status: 'iaKeyStatus',      pdf: true },
+  gemini:  { label: 'Gemini',  keyName: 'gemini_api_key',    input: 'prefGeminiKey',   status: 'geminiKeyStatus',  pdf: true },
+  mistral: { label: 'Mistral', keyName: 'mistral_api_key',   input: 'prefMistralKey',  status: 'mistralKeyStatus', pdf: false }
+};
+function iaProvider() { return IA_PROVIDERS[PREFS.iaProvider] ? PREFS.iaProvider : 'claude'; }
+function iaSetProvider(v) {
+  PREFS.iaProvider = IA_PROVIDERS[v] ? v : 'claude';
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  iaRefreshKeyStatus();
+  toast(`🤖 Fournisseur IA : ${IA_PROVIDERS[iaProvider()].label}`, 'bleu', 2000);
+}
+
+async function saveProviderKey(provider) {
+  const p = IA_PROVIDERS[provider];
+  const v = $(p.input).value.trim();
   if (!v) { toast('Saisissez une clé API', 'orange'); return; }
-  const r = await window.electronAPI.secretSet('anthropic_api_key', v);
+  const r = await window.electronAPI.secretSet(p.keyName, v);
   if (r && r.success) {
-    $('prefApiKey').value = '';
-    toast('✅ Clé API enregistrée (chiffrée)', 'vert');
+    $(p.input).value = '';
+    toast(`✅ Clé ${p.label} enregistrée (chiffrée)`, 'vert');
     iaRefreshKeyStatus();
   } else toast('Erreur : ' + (r && r.error || '?'), 'rouge');
 }
-async function deleteApiKey() {
-  await window.electronAPI.secretSet('anthropic_api_key', '');
-  toast('Clé API supprimée', 'orange');
+async function deleteProviderKey(provider) {
+  const p = IA_PROVIDERS[provider];
+  await window.electronAPI.secretSet(p.keyName, '');
+  toast(`Clé ${p.label} supprimée`, 'orange');
   iaRefreshKeyStatus();
 }
+// Compat boutons existants
+function saveApiKey() { return saveProviderKey('claude'); }
+function deleteApiKey() { return deleteProviderKey('claude'); }
+
 async function iaRefreshKeyStatus() {
   if (!isElectron) return;
-  const has = await window.electronAPI.secretHas('anthropic_api_key');
-  const st = $('iaKeyStatus');
-  if (st) st.innerHTML = has
-    ? '<span style="color:#085041">— ✅ une clé est enregistrée</span>'
-    : '<span style="color:#a93226">— aucune clé</span>';
+  const sel = $('prefIaProvider');
+  if (sel) sel.value = iaProvider();
+  let hasCurrent = false;
+  for (const [name, p] of Object.entries(IA_PROVIDERS)) {
+    const has = await window.electronAPI.secretHas(p.keyName);
+    if (name === iaProvider()) hasCurrent = has;
+    const st = $(p.status);
+    if (st) st.innerHTML = has
+      ? '<span style="color:#085041">— ✅ enregistrée</span>'
+      : '<span style="color:#a93226">— aucune</span>';
+  }
   const warn = $('iaKeyWarning');
-  if (warn) warn.style.display = has ? 'none' : 'block';
-  return has;
+  if (warn) {
+    warn.style.display = hasCurrent ? 'none' : 'block';
+    if (!hasCurrent) warn.innerHTML = `⚠️ Aucune clé API ${IA_PROVIDERS[iaProvider()].label} enregistrée
+      (fournisseur sélectionné). Allez dans <strong>Paramètres → 🤖 IA</strong> pour la saisir ou changer de fournisseur.`;
+  }
+  return hasCurrent;
 }
 
 /* ── Ajout de fichiers ── */
@@ -139,8 +168,11 @@ async function iaProcessQueue() {
   renderImportIA();
 
   try {
-    const payload = { filename: next.name, lots: LOTS, hints: {} };
+    const payload = { provider: iaProvider(), filename: next.name, lots: LOTS, hints: {} };
     if (next.kind === 'pdf') {
+      if (!IA_PROVIDERS[iaProvider()].pdf) {
+        throw new Error(`${IA_PROVIDERS[iaProvider()].label} ne lit pas les PDF — choisissez Claude ou Gemini dans Paramètres → 🤖 IA`);
+      }
       payload.kind = 'pdf';
       if (next.filePath) payload.filePath = next.filePath;
       else payload.base64 = next.base64;
