@@ -6,7 +6,7 @@
    Chargé après le script principal (portée globale partagée).
    ============================================================ */
 
-const GS_HEADER = ['ID', 'Repère', 'Lot', 'Désignation', 'Unité', 'Prix HT', 'Date', 'Chantier', 'Source', 'Auteur', 'Modifié le'];
+const GS_HEADER = ['ID', 'Repère', 'Lot', 'Désignation', 'Unité', 'Prix HT', 'Date', 'Chantier', 'Source', 'Auteur', 'Modifié le', 'Type'];
 const GS_SHEET_TITLE = 'BASE_PRIX';
 
 let GS = null;            // { spreadsheetId, url, sheetId, spreadsheetTitle }
@@ -28,15 +28,17 @@ function gsSaveShadow(s) {
 
 function gsSig(r) {
   return JSON.stringify([r.repere || '', r.lot || '', r.designation || '', r.unite || '',
-    Math.round((r.prix || 0) * 100) / 100, r.date || '', r.projet || '']);
+    Math.round((r.prix || 0) * 100) / 100, r.date || '', r.projet || '', normTypePrix(r)]);
 }
 function gsRowToValues(r) {
+  const t = normTypePrix(r);
   return [r.id, r.repere || '', r.lot || '', r.designation || '', r.unite || '',
     Math.round((r.prix || 0) * 100) / 100, r.date || '', r.projet || '', r.source || '',
-    GS_EMAIL || '', new Date().toISOString().slice(0, 19).replace('T', ' ')];
+    GS_EMAIL || '', new Date().toISOString().slice(0, 19).replace('T', ' '),
+    t === 'nc' ? '' : t];
 }
 function gsValuesToRow(v) {
-  return {
+  const row = {
     id: String(v[0] || ''),
     repere: String(v[1] ?? '').trim(),
     lot: String(v[2] ?? '').trim(),
@@ -47,6 +49,9 @@ function gsValuesToRow(v) {
     projet: String(v[7] ?? '').trim(),
     source: String(v[8] ?? '').trim()
   };
+  const t = String(v[11] ?? '').trim().toLowerCase();
+  if (t === 'vente' || t === 'debours') row.typePrix = t;
+  return row;
 }
 
 // Nombre de modifications locales pas encore poussées (diff BASE vs ombre)
@@ -97,6 +102,10 @@ async function gsSyncNow(forced) {
 
     const updates = [];        // [{row, values}]
     const appends = [];        // [values]
+    // ★ v2.6.1 — migration : compléter l'en-tête si la feuille date d'avant la colonne "Type"
+    if (values[0] && values[0].length < GS_HEADER.length) {
+      updates.push({ row: 1, values: GS_HEADER });
+    }
     const deleteRemote = [];   // [rowNum]
     const deleteLocalIds = new Set();
     const pulls = [];          // {local, data} lignes distantes à adopter

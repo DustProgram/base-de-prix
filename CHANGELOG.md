@@ -1,4 +1,66 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.6.0
+# 📋 Base de Prix — Évolutions v2.3 → v2.6.1
+
+## ⚡ v2.6.1 — Performances 4000+ prix, types Débours/Vente, ratios corrigés + personnalisés
+
+### ⚡ Performances (retour terrain : 4631 prix)
+
+Le rendu de « Tous les prix » était quadratique : pour CHAQUE ligne affichée, l'app
+refaisait une recherche complète dans la base (`indexOf` + détection d'anomalie par
+filtre complet), et re-générait tout le tableau à chaque frappe de recherche.
+
+- Filtrage en un seul passage avec index conservé, détection d'anomalie via un
+  index pré-calculé (O(1) par ligne)
+- Recherche « debouncée » (200 ms) : plus de re-rendu à chaque caractère
+- Pagination : 300 lignes affichées, boutons « +1000 » / « Tout afficher »
+- Un seul écouteur d'édition délégué au lieu d'un par cellule
+
+### 🏷 Types de prix : Débours vs Vente
+
+Chaque prix porte désormais un type : **🧾 Débours** (devis sous-traitants, coûts
+chantier) ou **💰 Vente** (DPGF prix client), ou reste « non défini ».
+
+- Choix du type à la saisie (modale, saisie masse, Import IA — débours par défaut)
+- Bouton **« 🏷 Typer le filtre »** dans Tous les prix : reclassement en masse des
+  lignes filtrées (idéal pour typer l'existant par projet/lot)
+- Filtre par type dans Tous les prix + colonne badge V/D triable
+- **Ratios** et **estimation DPGF** calculables au choix sur : tous les prix,
+  vente uniquement, ou débours uniquement (sélecteurs dédiés, mémorisés)
+- Les anomalies ne comparent plus que des prix du même type (un débours face à un
+  prix de vente n'est pas une anomalie, c'est une marge)
+- Colonne « Type » ajoutée à la feuille Google Sheets (migration automatique de
+  l'en-tête ; la première sync après mise à jour re-pousse toutes les lignes)
+
+### 🧩 Ratios auto par type d'ouvrage — regroupement corrigé
+
+Retour terrain : « porte bois » et « porte métallique » étaient regroupées (les mots
+creux « fourniture », « pose »… gonflaient la similarité).
+
+- **Mots creux BTP ignorés** dans le calcul de similarité
+- **Matériaux incompatibles jamais regroupés** (bois ≠ métal ≠ alu ≠ PVC…)
+- **Signatures techniques discriminantes** : C25/30 ≠ C30/37, CEM II ≠ CEM III,
+  XC/XF, DN, diamètres, épaisseurs, EI/CF… Un béton « Ecopact C30/37 CEM III » est
+  classé par sa classe technique, pas par sa marque
+- **Unités normalisées** (m² = M2 = m2, FFT = forfait, PCE = u…) et **jamais
+  mélangées** dans un même groupe (fini les moyennes forfait + m2)
+
+### 🛠 Ratios personnalisés (« Mes ratios »)
+
+Troisième vue dans la page Ratios : créez vos propres regroupements.
+
+- Nom, lot (optionnel), unité (recommandé), **mots-clés de recherche automatique**
+  dans les désignations (ex : `c30/37, cem iii`) et mots-clés d'exclusion
+- Aperçu en direct, exclusion de lignes à la case à cocher, **ajout manuel** de prix
+  précis via recherche — ou ratio 100 % manuel sans mots-clés
+- Alerte « ⚠️ unités mélangées » si le ratio combine des unités différentes
+
+### 🐛 Corrections
+
+- Le titre de « Tous les prix » restait bloqué sur le dernier lot cliqué même en
+  mode « tous les lots »
+- La modification d'un prix (modale ✏️) perdait son identifiant stable, ce que la
+  sync Google Sheets voyait comme une suppression + un ajout
+
+---
 
 ## 🚀 v2.6.0 — Import IA, Google Sheets collaboratif, ratios par type d'ouvrage
 

@@ -247,15 +247,27 @@ function iaMapLigne(l, doc, filename) {
   };
 }
 
-/* ── Drapeaux qualité ── */
+/* ── Type de prix appliqué à l'import (débours par défaut : les offres
+      de chantier / devis sous-traitants sont des coûts, pas des prix client) ── */
+function iaCurrentType() { return PREFS.iaTypePrix || 'debours'; }
+function iaSetType(v) {
+  PREFS.iaTypePrix = v;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  renderImportIA();
+}
+
+/* ── Drapeaux qualité (comparaison au sein du même type de prix) ── */
 function iaIsDoublon(row) {
+  const t = iaCurrentType();
   return BASE.some(r => r.repere === row.repere &&
+    normTypePrix(r) === t &&
     (r.date || '') === (row.date || '') &&
     (r.projet || '') === (row.projet || '') &&
     Math.abs((r.prix || 0) - row.prix) < 0.005);
 }
 function iaIsAnomalie(row) {
-  const matchs = BASE.filter(x => x.repere === row.repere);
+  const t = iaCurrentType();
+  const matchs = BASE.filter(x => x.repere === row.repere && normTypePrix(x) === t);
   if (matchs.length < 3) return false;
   const prix = matchs.map(x => x.prix);
   const min = Math.min(...prix), max = Math.max(...prix);
@@ -265,6 +277,8 @@ function iaIsAnomalie(row) {
 /* ── Rendu ── */
 function renderImportIA() {
   iaRefreshKeyStatus();
+  const ts = $('iaTypeSel');
+  if (ts) ts.value = iaCurrentType();
 
   // File d'attente
   const wrap = $('iaQueueWrap');
@@ -405,13 +419,16 @@ async function iaValiderImport() {
   }
   await snapshotIfImportant('Avant import IA');
   pushUndo(`Import IA (${rows.length} prix)`);
+  const typeSel = iaCurrentType();
   rows.forEach(r => {
-    BASE.push({
+    const obj = {
       id: genId(),
       repere: r.repere, lot: r.lot, designation: r.designation,
       unite: r.unite, prix: r.prix, date: r.date, projet: r.projet,
       source: r.source
-    });
+    };
+    if (typeSel !== 'nc') obj.typePrix = typeSel;
+    BASE.push(obj);
   });
   IA_ROWS = IA_ROWS.filter(r => !r.include);
   save();

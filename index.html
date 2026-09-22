@@ -501,12 +501,20 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <span id="baseCount" style="font-weight:400;color:#888;font-size:11px"></span>
     </div>
     <div class="srch-row">
-      <input type="text" id="searchBase" placeholder="🔍 Rechercher..." oninput="renderBase()">
-      <select id="filterLot" onchange="renderBase()"><option value="">Tous les lots</option></select>
-      <select id="filterProj" onchange="renderBase()"><option value="">Tous les projets</option></select>
-      <select id="filterAnnee" onchange="renderBase()"><option value="">Toutes années</option></select>
+      <input type="text" id="searchBase" placeholder="🔍 Rechercher..." oninput="debouncedRenderBase()">
+      <select id="filterLot" onchange="resetAndRenderBase()"><option value="">Tous les lots</option></select>
+      <select id="filterType" onchange="resetAndRenderBase()" title="Type de prix">
+        <option value="">Tous types</option>
+        <option value="vente">💰 Vente</option>
+        <option value="debours">🧾 Débours</option>
+        <option value="nc">· Non défini</option>
+      </select>
+      <select id="filterProj" onchange="resetAndRenderBase()"><option value="">Tous les projets</option></select>
+      <select id="filterAnnee" onchange="resetAndRenderBase()"><option value="">Toutes années</option></select>
       <button class="btn btn-gris" title="Trier par lot, puis date (récent d'abord), puis chantier"
               onclick="baseSortCol='__multi';baseSortDir=1;renderBase()">📑 Lot › Date › Chantier</button>
+      <button class="btn btn-orange" title="Attribuer un type (Vente/Débours) à toutes les lignes actuellement filtrées"
+              onclick="openBulkType()">🏷 Typer le filtre</button>
       <button class="btn btn-vert" onclick="openAjout()">+ Ajouter un prix</button>
     </div>
     <div class="tbl-wrap"><table id="tblBase"></table></div>
@@ -528,6 +536,15 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <button class="btn btn-violet" onclick="associerTout()">🔗 Associer toutes les lignes</button>
       <button class="btn btn-vert" onclick="exportDPGF()">⬇ Exporter DPGF complétée</button>
       <button class="btn btn-rouge" onclick="clearDPGF()">🗑 Vider</button>
+      <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Estimer avec :
+        <select id="dpgfTypeSel" onchange="setDpgfTypeFilter(this.value)" style="width:auto">
+          <option value="tous">Tous les prix</option>
+          <option value="vente">💰 Prix de vente</option>
+          <option value="debours">🧾 Prix débours</option>
+        </select>
+      </span>
     </div>
   </div>
 
@@ -567,6 +584,14 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <button class="btn btn-orange" onclick="appliquerProjet()">🏷 Appliquer projet/date à tout</button>
       <button class="btn btn-rouge" onclick="clearMasse()">🗑 Vider</button>
       <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Type :
+        <select id="masseTypeSel" style="width:auto" title="Type appliqué à toutes les lignes importées">
+          <option value="vente">💰 Vente</option>
+          <option value="debours">🧾 Débours</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </span>
       <button class="btn btn-vert" onclick="validerMasse()">✅ Importer dans la base</button>
     </div>
     <div class="btn-row" style="margin-top:8px;border-top:1px dashed #ccc;padding-top:10px">
@@ -602,7 +627,8 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <span style="display:flex;gap:6px;align-items:center">
         <div class="dpgf-mode-toggle" id="ratioViewToggle">
           <button class="on" data-rview="repere" onclick="setRatioView('repere')">🏷 Par repère</button>
-          <button data-rview="types" onclick="setRatioView('types')">🧩 Par type d'ouvrage</button>
+          <button data-rview="types" onclick="setRatioView('types')">🧩 Auto par type</button>
+          <button data-rview="perso" onclick="setRatioView('perso')">🛠 Mes ratios</button>
         </div>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="expandAllRatios()">↕ Tout déployer</button>
         <button class="btn btn-gris" style="font-size:10px;padding:4px 10px" onclick="collapseAllRatios()">↔ Tout replier</button>
@@ -618,9 +644,21 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       ou viennent de chantiers différents. La moyenne est calculée sur tout le groupe.
       <strong>Cliquez sur une ligne</strong> pour voir le détail par chantier et par date.
     </div>
+    <div class="info info-bleu" id="ratiosHelpPerso" style="display:none">
+      ★ v2.6.1 — <strong>Vos propres ratios</strong> : définissez un nom, un lot, une unité et des
+      mots-clés de recherche automatique dans les désignations (optionnel), puis ajustez à la main
+      en excluant ou ajoutant des prix précis. Exemple : « Béton C30/37 CEM III » avec les mots-clés
+      <code>c30/37, cem iii</code>.
+    </div>
     <div class="srch-row">
       <input type="text" id="searchRatio" placeholder="🔍 Filtrer..." oninput="renderRatios()">
       <select id="filterRatioLot" onchange="renderRatios()"><option value="">Tous les lots</option></select>
+      <select id="ratioTypeSel" onchange="setRatioTypeFilter(this.value)" title="Type de prix utilisé pour les ratios">
+        <option value="tous">Tous les prix</option>
+        <option value="vente">💰 Vente</option>
+        <option value="debours">🧾 Débours</option>
+      </select>
+      <button class="btn btn-vert" id="btnNewCustomRatio" style="display:none" onclick="openCustomRatioEdit(-1)">+ Créer un ratio</button>
     </div>
     <div class="tbl-wrap"><table id="tblRatios"></table></div>
   </div>
@@ -645,6 +683,15 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <button class="btn btn-orange" id="iaBtnPause" onclick="iaTogglePause()" style="display:none">⏸ Mettre en pause</button>
       <button class="btn btn-rouge" onclick="iaClearQueue()">🗑 Vider la file</button>
       <span style="flex:1"></span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#666;font-weight:600">
+        Ces documents sont des prix :
+        <select id="iaTypeSel" style="width:auto" onchange="iaSetType(this.value)"
+                title="Type appliqué aux lignes importées (un devis sous-traitant = débours, une DPGF client = vente)">
+          <option value="debours">🧾 Débours (devis ST, chantier)</option>
+          <option value="vente">💰 Vente (DPGF client)</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </span>
       <span id="iaTotalCost" style="font-size:10px;color:#888;align-self:center"></span>
     </div>
     <div class="help-text" style="margin-top:8px">
@@ -876,6 +923,14 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
         </select>
       </div>
       <div><label>Prix HT (€) *</label><input type="number" id="ajPrix" step="0.01" oninput="checkAjPrice()"></div>
+      <div>
+        <label>Type de prix</label>
+        <select id="ajType">
+          <option value="vente">💰 Vente (DPGF, prix client)</option>
+          <option value="debours">🧾 Débours (devis ST, coût chantier)</option>
+          <option value="nc">· Non défini</option>
+        </select>
+      </div>
       <div><label>Date</label><input type="date" id="ajDate"></div>
       <div><label>Projet</label><input type="text" id="ajProjet" placeholder="ex : Résidence Les Pins"></div>
     </div>
@@ -1275,6 +1330,79 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   </div>
 </div>
 
+<!-- ★ v2.6.1 : Création / édition d'un ratio personnalisé -->
+<div class="modal-bg" id="modalRatioEdit" data-modal="ratioedit">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-title" id="crTitle">+ Créer un ratio personnalisé</div>
+    <div class="form-grid">
+      <div><label>Nom du ratio *</label><input type="text" id="crNom" placeholder="ex : Béton C30/37 CEM III"></div>
+      <div><label>Lot (optionnel)</label><select id="crLot"></select></div>
+      <div>
+        <label>Unité (optionnel, recommandé)</label>
+        <select id="crUnite">
+          <option value="">Toutes</option>
+          <option>m2</option><option>ml</option><option>m3</option><option>u</option>
+          <option>ens</option><option>kg</option><option>h</option><option>forfait</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:8px">
+      <div>
+        <label>Mots-clés à trouver dans la désignation (séparés par des virgules)</label>
+        <input type="text" id="crMots" placeholder="ex : c30/37, cem iii" oninput="crRefreshPreview()">
+        <div class="help-text">Une ligne correspond si sa désignation contient TOUS ces mots (accents/majuscules ignorés). Vide = sélection 100 % manuelle.</div>
+      </div>
+      <div>
+        <label>Mots-clés à exclure (optionnel)</label>
+        <input type="text" id="crMotsExclus" placeholder="ex : reprise, plus-value" oninput="crRefreshPreview()">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700">Aperçu des prix correspondants <span id="crPreviewCount" style="font-weight:400;color:#888"></span></label>
+      <div id="crPreview" style="border:1px solid var(--bord);border-radius:5px;max-height:220px;overflow-y:auto;margin-top:4px"></div>
+      <div class="help-text" style="margin-top:4px">☑ décochez une ligne pour l'exclure de ce ratio. Pour ajouter un prix qui ne matche pas les mots-clés, cherchez-le :</div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <input type="text" id="crAddSearch" placeholder="🔍 Chercher un prix à ajouter à la main..." oninput="crRefreshAddList()" style="flex:1">
+      </div>
+      <div id="crAddList" style="border:1px dashed var(--bord);border-radius:5px;max-height:140px;overflow-y:auto;margin-top:4px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-rouge" id="crBtnDelete" style="display:none;margin-right:auto" onclick="deleteCustomRatio()">🗑 Supprimer ce ratio</button>
+      <button class="btn btn-gris" onclick="closeModal('modalRatioEdit')">Annuler</button>
+      <button class="btn btn-vert" onclick="saveCustomRatio()">✅ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v2.6.1 : Typage en masse Vente/Débours -->
+<div class="modal-bg" id="modalBulkType" data-modal="bulktype">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">🏷 Typer les prix filtrés</div>
+    <div class="info info-bleu" id="bulkTypeInfo"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="vente" checked>
+        <div><strong style="color:#2980b9">💰 Prix de vente</strong>
+        <div style="font-size:10px;color:#666">DPGF remises aux clients, prix de vente entreprise</div></div>
+      </label>
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="debours">
+        <div><strong style="color:#d35400">🧾 Prix débours</strong>
+        <div style="font-size:10px;color:#666">Devis sous-traitants, coûts chantier</div></div>
+      </label>
+      <label style="display:flex;gap:8px;padding:8px;border:1px solid var(--bord);border-radius:5px;cursor:pointer">
+        <input type="radio" name="bulkType" value="nc">
+        <div><strong style="color:#888">· Non défini</strong>
+        <div style="font-size:10px;color:#666">Retirer le type de ces lignes</div></div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalBulkType')">Annuler</button>
+      <button class="btn btn-vert" onclick="confirmBulkType()">✅ Appliquer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ★ v2.6 : Choix du type de liaison -->
 <div class="modal-bg" id="modalLinkType" data-modal="linktype">
   <div class="modal" style="max-width:560px">
@@ -1336,7 +1464,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.6.1';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1361,6 +1489,10 @@ PREFS.checkExternal = PREFS.checkExternal !== false;       // ★ v2.3
 PREFS.autoSnapshot  = PREFS.autoSnapshot !== false;        // ★ v2.3
 PREFS.ratioExclusions = PREFS.ratioExclusions || [];       // ★ v2.5+ : signatures de prix exclus du calcul de ratio
 PREFS.anomalyExclusions = PREFS.anomalyExclusions || [];   // ★ v2.5.2 : signatures de prix marqués "C'est normal"
+PREFS.dpgfTypeFilter  = PREFS.dpgfTypeFilter  || 'tous';   // ★ v2.6.1 : estimer la DPGF avec vente/débours/tous
+PREFS.ratioTypeFilter = PREFS.ratioTypeFilter || 'tous';   // ★ v2.6.1 : ratios calculés sur vente/débours/tous
+PREFS.lastTypePrix    = PREFS.lastTypePrix    || 'vente';  // ★ v2.6.1 : dernier type utilisé à la saisie
+PREFS.customRatios    = PREFS.customRatios    || [];       // ★ v2.6.1 : ratios définis par l'utilisateur
 
 // LOTS = liste active (référence dynamique vers PREFS.lots)
 let LOTS = PREFS.lots;
@@ -1404,6 +1536,9 @@ const MAX_UNDO = 20;
 
 // ★ v2.4 — Tri tableaux
 let baseSortCol = null, baseSortDir = 1;
+// ★ v2.6.1 — Pagination de la page Base (rendu par tranches pour rester fluide)
+const BASE_PAGE_SIZE = 300;
+let baseRenderLimit = BASE_PAGE_SIZE;
 let ratiosSortCol = null, ratiosSortDir = 1;
 
 // ★ v2.4 — Ratios expansibles
@@ -1426,6 +1561,63 @@ function ensureIds() {
   let changed = false;
   BASE.forEach(r => { if (!r.id) { r.id = genId(); changed = true; } });
   return changed;
+}
+
+/* ★ v2.6.1 — Type de prix : débours (devis sous-traitant, coût chantier)
+   ou vente (DPGF prix client). Les prix non classés restent visibles partout
+   mais peuvent être filtrés. */
+const TYPES_PRIX = {
+  vente:   { label: 'Vente',   short: 'V', color: '#2980b9' },
+  debours: { label: 'Débours', short: 'D', color: '#d35400' }
+};
+function normTypePrix(r) {
+  const t = r && r.typePrix;
+  return (t === 'debours' || t === 'vente') ? t : 'nc';
+}
+function typeBadge(r) {
+  const t = normTypePrix(r);
+  if (t === 'nc') return '<span class="badge" style="background:#eee;color:#999" title="Type non défini (Vente/Débours)">·</span>';
+  const d = TYPES_PRIX[t];
+  return `<span class="badge" style="background:${d.color}22;color:${d.color}" title="Prix de ${d.label.toLowerCase()}">${d.short}</span>`;
+}
+function poolByType(sel) {
+  if (!sel || sel === 'tous') return BASE;
+  return BASE.filter(r => normTypePrix(r) === sel);
+}
+// Pools filtrés utilisés par l'estimation DPGF et par les ratios
+function dpgfPool()  { return poolByType(PREFS.dpgfTypeFilter); }
+function ratioPool() { return poolByType(PREFS.ratioTypeFilter); }
+
+/* ★ v2.6.1 — Index d'anomalies : pré-calcule min/max par (repère, type) en un
+   seul passage sur BASE, au lieu d'un filtre complet PAR LIGNE affichée
+   (c'était la cause principale des lags au-delà de ~2000 prix). */
+function buildAnomalyIndex() {
+  const m = new Map();
+  for (const r of BASE) {
+    const k = r.repere + '||' + normTypePrix(r);
+    let g = m.get(k);
+    if (!g) { g = { count: 0, min1: Infinity, min2: Infinity, max1: -Infinity, max2: -Infinity, cntMin: 0, cntMax: 0 }; m.set(k, g); }
+    g.count++;
+    const p = r.prix;
+    if (p < g.min1)       { g.min2 = g.min1; g.min1 = p; g.cntMin = 1; }
+    else if (p === g.min1){ g.cntMin++; }
+    else if (p < g.min2)  { g.min2 = p; }
+    if (p > g.max1)       { g.max2 = g.max1; g.max1 = p; g.cntMax = 1; }
+    else if (p === g.max1){ g.cntMax++; }
+    else if (p > g.max2)  { g.max2 = p; }
+  }
+  return m;
+}
+// Équivalent de isAnomaly(r) mais en O(1) grâce à l'index ("les autres prix" =
+// le groupe privé de cette ligne, reconstruit via les 2 premiers extrêmes)
+function isAnomalyIdx(r, idx) {
+  if (isAnomalyMarkedNormal(r)) return false;
+  const g = idx.get(r.repere + '||' + normTypePrix(r));
+  if (!g || g.count < 3) return false;
+  const othersMin = (r.prix === g.min1 && g.cntMin === 1) ? g.min2 : g.min1;
+  const othersMax = (r.prix === g.max1 && g.cntMax === 1) ? g.max2 : g.max1;
+  if (!isFinite(othersMin) || !isFinite(othersMax)) return false;
+  return r.prix < othersMin * 0.5 || r.prix > othersMax * 2;
 }
 
 function save(skipSync) {
@@ -1744,7 +1936,7 @@ function showPage(p){
 function showLot(lot){
   showPage('base');
   $('filterLot').value = lot;
-  $('baseTitle').textContent = '📦 ' + lot;
+  baseRenderLimit = BASE_PAGE_SIZE;
   renderBase();
 }
 document.querySelectorAll('.nav-btn[data-page], .sb-item[data-page]').forEach(b=>{
@@ -1818,29 +2010,48 @@ function renderAccueil(){
 /* ============================================================
    ★ v2.4 ★ BASE — affichage avec tri, édition inline, filtres combinés
    ============================================================ */
+/* ★ v2.6.1 — renderBase optimisé pour les grosses bases (4000+ prix) :
+   - un seul passage de filtrage qui CONSERVE l'index (fini le BASE.indexOf
+     par ligne qui rendait le rendu quadratique) ;
+   - détection d'anomalie via index pré-calculé (O(1) par ligne) ;
+   - pagination par tranches de 300 lignes ;
+   - un seul écouteur dblclick délégué au lieu d'un par cellule ;
+   - recherche « debouncée » (voir debouncedRenderBase). */
 function renderBase(){
   const srch = ($('searchBase').value||'').toLowerCase();
   const lot  = $('filterLot').value;
   const proj = $('filterProj').value;
   const annee= $('filterAnnee').value;
-  let d = BASE.filter(r =>
-    (!lot   || r.lot===lot) &&
-    (!proj  || r.projet===proj) &&
-    (!annee || (r.date||'').startsWith(annee)) &&
-    (!srch  || r.designation.toLowerCase().includes(srch)
-            || r.repere.toLowerCase().includes(srch)
-            || (r.projet||'').toLowerCase().includes(srch)));
+  const typeF= $('filterType') ? $('filterType').value : '';
+
+  // ★ v2.6.1 — le titre reflète le filtre réel (fix : il restait bloqué sur le dernier lot cliqué)
+  $('baseTitle').textContent = lot ? '📦 ' + lot : '📦 Base de Prix';
+
+  // Filtrage en un passage, index d'origine conservé
+  let d = [];
+  for (let i = 0; i < BASE.length; i++) {
+    const r = BASE[i];
+    if (lot   && r.lot !== lot) continue;
+    if (proj  && r.projet !== proj) continue;
+    if (annee && !(r.date||'').startsWith(annee)) continue;
+    if (typeF && normTypePrix(r) !== typeF) continue;
+    if (srch  && !(r.designation.toLowerCase().includes(srch)
+               || r.repere.toLowerCase().includes(srch)
+               || (r.projet||'').toLowerCase().includes(srch))) continue;
+    d.push({ r, i });
+  }
 
   // Tri
   if (baseSortCol === '__multi') {
     // ★ v2.6 — tri groupé Lot (ordre des lots) › Date (récent d'abord) › Chantier
     d.sort((a,b) =>
-      (lotIdx(a.lot) - lotIdx(b.lot)) ||
-      String(b.date||'').localeCompare(String(a.date||'')) ||
-      String(a.projet||'').localeCompare(String(b.projet||'')));
+      (lotIdx(a.r.lot) - lotIdx(b.r.lot)) ||
+      String(b.r.date||'').localeCompare(String(a.r.date||'')) ||
+      String(a.r.projet||'').localeCompare(String(b.r.projet||'')));
   } else if (baseSortCol) {
-    d.sort((a,b) => {
-      let va = a[baseSortCol], vb = b[baseSortCol];
+    d.sort((x,y) => {
+      let va = baseSortCol === 'typePrix' ? normTypePrix(x.r) : x.r[baseSortCol];
+      let vb = baseSortCol === 'typePrix' ? normTypePrix(y.r) : y.r[baseSortCol];
       if (typeof va === 'number' && typeof vb === 'number') return (va-vb)*baseSortDir;
       return String(va||'').localeCompare(String(vb||''))*baseSortDir;
     });
@@ -1851,6 +2062,7 @@ function renderBase(){
   const cols = [
     {k:'repere',      label:'Repère'},
     {k:'lot',         label:'Lot'},
+    {k:'typePrix',    label:'Type'},
     {k:'designation', label:'Désignation'},
     {k:'unite',       label:'Unité'},
     {k:'prix',        label:'Prix HT', align:'right'},
@@ -1862,36 +2074,102 @@ function renderBase(){
     return `<th class="sortable ${cls}" onclick="sortBase('${c.k}')" style="text-align:${c.align||'left'}">${c.label}</th>`;
   }).join('') + '<th></th>';
 
+  const anomIdx = buildAnomalyIndex();
+  const shown = d.slice(0, baseRenderLimit);
+  const rowsHtml = shown.map(({r, i}) => {
+    const anom = isAnomalyIdx(r, anomIdx) ? ` <span class="anomaly-icon" title="Cliquer pour voir le détail" onclick="event.stopPropagation();openAnomalyPopup(${i})">⚠️</span>` : '';
+    return `<tr data-idx="${i}">
+      <td class="editable" data-field="repere"><strong>${esc(r.repere)}</strong></td>
+      <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
+      <td style="text-align:center">${typeBadge(r)}</td>
+      <td class="editable" data-field="designation">${esc(r.designation)}</td>
+      <td class="editable" data-field="unite">${esc(r.unite)}</td>
+      <td class="editable" data-field="prix" style="text-align:right"><strong style="color:#085041">${fmtPrix(r.prix)}</strong>${anom}</td>
+      <td class="editable" data-field="date" style="color:#888;font-size:10px">${esc(r.date)||'—'}</td>
+      <td class="editable" data-field="projet" style="font-size:10px">${esc(r.projet)||'—'}</td>
+      <td style="display:flex;gap:3px">
+        <button class="btn btn-bleu" style="padding:2px 7px;font-size:10px" onclick="openEdit(${i})">✏️</button>
+        <button class="btn btn-rouge" style="padding:2px 7px;font-size:10px" onclick="delPrix(${i})">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const moreHtml = d.length > shown.length
+    ? `<tr><td colspan="9" style="text-align:center;padding:10px">
+         <button class="btn btn-gris" onclick="baseRenderLimit+=1000;renderBase()">⬇ Afficher 1000 de plus (${d.length - shown.length} restants)</button>
+         <button class="btn btn-gris" onclick="baseRenderLimit=Infinity;renderBase()">Tout afficher</button>
+       </td></tr>`
+    : '';
+
   $('tblBase').innerHTML =
     `<thead><tr>${headHtml}</tr></thead>
-     <tbody>${d.map((r)=>{
-       const i = BASE.indexOf(r);
-       const anom = isAnomaly(r) ? ` <span class="anomaly-icon" title="Cliquer pour voir le détail" onclick="event.stopPropagation();openAnomalyPopup(${i})">⚠️</span>` : '';
-       return `<tr data-idx="${i}">
-        <td class="editable" data-field="repere"><strong>${esc(r.repere)}</strong></td>
-        <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
-        <td class="editable" data-field="designation">${esc(r.designation)}</td>
-        <td class="editable" data-field="unite">${esc(r.unite)}</td>
-        <td class="editable" data-field="prix" style="text-align:right"><strong style="color:#085041">${fmtPrix(r.prix)}</strong>${anom}</td>
-        <td class="editable" data-field="date" style="color:#888;font-size:10px">${esc(r.date)||'—'}</td>
-        <td class="editable" data-field="projet" style="font-size:10px">${esc(r.projet)||'—'}</td>
-        <td style="display:flex;gap:3px">
-          <button class="btn btn-bleu" style="padding:2px 7px;font-size:10px" onclick="openEdit(${i})">✏️</button>
-          <button class="btn btn-rouge" style="padding:2px 7px;font-size:10px" onclick="delPrix(${i})">🗑</button>
-        </td>
-      </tr>`;
-     }).join('')||'<tr><td colspan="8" style="text-align:center;color:#888;padding:20px">Aucun prix trouvé</td></tr>'}</tbody>`;
-
-  // Activer édition inline (double-clic)
-  $('tblBase').querySelectorAll('td.editable').forEach(td => {
-    td.addEventListener('dblclick', () => editInline(td));
-  });
+     <tbody>${rowsHtml + moreHtml || '<tr><td colspan="9" style="text-align:center;color:#888;padding:20px">Aucun prix trouvé</td></tr>'}</tbody>`;
 }
+
+// Recherche : re-rendu différé pour ne pas re-générer 4000 lignes à chaque frappe
+let _rbDebounce = null;
+function debouncedRenderBase() {
+  clearTimeout(_rbDebounce);
+  _rbDebounce = setTimeout(() => { baseRenderLimit = BASE_PAGE_SIZE; renderBase(); }, 200);
+}
+function resetAndRenderBase() { baseRenderLimit = BASE_PAGE_SIZE; renderBase(); }
+
+// Édition inline : un seul écouteur délégué (au lieu d'un par cellule)
+document.addEventListener('DOMContentLoaded', () => {
+  $('tblBase').addEventListener('dblclick', e => {
+    const td = e.target.closest('td.editable');
+    if (td) editInline(td);
+  });
+});
 
 function sortBase(col) {
   if (baseSortCol === col) baseSortDir = -baseSortDir;
   else { baseSortCol = col; baseSortDir = 1; }
   renderBase();
+}
+
+/* ★ v2.6.1 — Typage en masse des lignes actuellement filtrées (Vente/Débours) */
+function baseFilteredIndices() {
+  const srch = ($('searchBase').value||'').toLowerCase();
+  const lot  = $('filterLot').value;
+  const proj = $('filterProj').value;
+  const annee= $('filterAnnee').value;
+  const typeF= $('filterType') ? $('filterType').value : '';
+  const out = [];
+  for (let i = 0; i < BASE.length; i++) {
+    const r = BASE[i];
+    if (lot   && r.lot !== lot) continue;
+    if (proj  && r.projet !== proj) continue;
+    if (annee && !(r.date||'').startsWith(annee)) continue;
+    if (typeF && normTypePrix(r) !== typeF) continue;
+    if (srch  && !(r.designation.toLowerCase().includes(srch)
+               || r.repere.toLowerCase().includes(srch)
+               || (r.projet||'').toLowerCase().includes(srch))) continue;
+    out.push(i);
+  }
+  return out;
+}
+function openBulkType() {
+  const idxs = baseFilteredIndices();
+  if (!idxs.length) { toast('Aucune ligne dans le filtre actuel', 'orange'); return; }
+  $('bulkTypeInfo').innerHTML = `Le type choisi sera appliqué aux <strong>${idxs.length} prix actuellement filtrés</strong>
+    (affinez d'abord avec la recherche et les filtres Lot/Projet/Année si besoin).`;
+  openModal('modalBulkType');
+}
+function confirmBulkType() {
+  const choice = document.querySelector('input[name="bulkType"]:checked').value;
+  const idxs = baseFilteredIndices();
+  if (!idxs.length) { closeModal('modalBulkType'); return; }
+  pushUndo(`Typage en masse (${idxs.length} prix)`);
+  idxs.forEach(i => {
+    if (choice === 'nc') delete BASE[i].typePrix;
+    else BASE[i].typePrix = choice;
+  });
+  save();
+  closeModal('modalBulkType');
+  renderBase(); renderAccueil();
+  const lbl = choice === 'nc' ? 'Non défini' : TYPES_PRIX[choice].label;
+  toast(`🏷 ${idxs.length} prix marqués « ${lbl} »`, 'vert', 3000);
 }
 
 /* ★ v2.4 — Édition inline */
@@ -1962,6 +2240,7 @@ function openAjout(){
   $('ajDate').value = new Date().toISOString().slice(0,10);
   $('ajLot').selectedIndex = 0;
   $('ajUnite').selectedIndex = 0;
+  $('ajType').value = PREFS.lastTypePrix || 'vente';
   $('ajRatioInfo').style.display = 'none';
   $('ajAnomalyInfo').style.display = 'none';
   $('ajDoublonInfo').style.display = 'none';
@@ -1979,6 +2258,7 @@ function openEdit(i){
   $('ajDesg').value  = r.designation;
   $('ajUnite').value = r.unite;
   $('ajPrix').value  = r.prix;
+  $('ajType').value  = normTypePrix(r);
   $('ajDate').value  = r.date || '';
   $('ajProjet').value = r.projet || '';
   onRepChange();
@@ -2019,7 +2299,8 @@ function checkAjPrice() {
     $('ajDoublonInfo').style.display = 'none';
     return;
   }
-  const matchs = BASE.filter(r => r.repere === rep);
+  const typeSel = $('ajType') ? $('ajType').value : 'nc';
+  const matchs = BASE.filter(r => r.repere === rep && normTypePrix(r) === typeSel);
   if (matchs.length < 2) {
     $('ajAnomalyInfo').style.display = 'none';
   } else {
@@ -2067,7 +2348,9 @@ function markAnomalyNormal(r) {
 
 function isAnomaly(r) {
   if (isAnomalyMarkedNormal(r)) return false;
-  const matchs = BASE.filter(x => x.repere === r.repere);
+  // ★ v2.6.1 : comparer uniquement des prix du même type (un débours vs un
+  // prix de vente n'est pas une anomalie, c'est une marge)
+  const matchs = BASE.filter(x => x.repere === r.repere && normTypePrix(x) === normTypePrix(r));
   if (matchs.length < 3) return false;
   const others = matchs.filter(x => x !== r).map(x => x.prix);
   if (!others.length) return false;
@@ -2076,8 +2359,8 @@ function isAnomaly(r) {
 }
 
 function getAnomalyStats(r) {
-  // Renvoie les stats complètes pour la popup
-  const matchs = BASE.filter(x => x.repere === r.repere && x !== r);
+  // Renvoie les stats complètes pour la popup (même type de prix uniquement)
+  const matchs = BASE.filter(x => x.repere === r.repere && x !== r && normTypePrix(x) === normTypePrix(r));
   if (!matchs.length) return null;
   const prix = matchs.map(x => x.prix);
   const min = Math.min(...prix), max = Math.max(...prix);
@@ -2165,12 +2448,20 @@ function enregistrer(){
     return;
   }
   pushUndo(editIndex >= 0 ? 'Modification prix' : 'Ajout prix');
+  const typeSel = $('ajType').value;
   const obj = {
     repere: rep, lot, designation: desg,
     unite: $('ajUnite').value,
     prix, date: $('ajDate').value, projet: $('ajProjet').value.trim()
   };
-  if (editIndex >= 0) { BASE[editIndex] = obj; toast('Prix modifié', 'bleu'); }
+  if (typeSel !== 'nc') { obj.typePrix = typeSel; PREFS.lastTypePrix = typeSel; localStorage.setItem('bp_prefs', JSON.stringify(PREFS)); }
+  if (editIndex >= 0) {
+    // ★ v2.6.1 fix : conserver l'id stable de la ligne (sinon la sync Google Sheets
+    // voyait chaque modification comme une suppression + un ajout)
+    obj.id = BASE[editIndex].id;
+    if (BASE[editIndex].source) obj.source = BASE[editIndex].source;
+    BASE[editIndex] = obj; toast('Prix modifié', 'bleu');
+  }
   else                { BASE.push(obj);          toast('Prix ajouté', 'vert'); }
   save(); closeModal('modalAjout');
   initUI(); renderBase(); renderAccueil();
@@ -2219,7 +2510,8 @@ function renderDPGF(){
               onclick="openSel(${i})">Choisir…</button>
     </div>`;
 
-  const reps = [...new Set(BASE.map(r=> r.repere))].sort();
+  $('dpgfTypeSel').value = PREFS.dpgfTypeFilter || 'tous';
+  const reps = [...new Set(dpgfPool().map(r=> r.repere))].sort();
   const datalist = `<datalist id="repDatalist">${reps.map(r=>`<option value="${esc(r)}">`).join('')}</datalist>`;
 
   if (dpgfView === 'continue'){
@@ -2250,11 +2542,20 @@ function renderDPGF(){
   }
 }
 
+function setDpgfTypeFilter(v){
+  PREFS.dpgfTypeFilter = v;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  renderDPGF();
+  toast(v === 'tous' ? 'Estimation sur tous les prix' :
+        v === 'vente' ? '💰 Estimation sur les prix de VENTE uniquement' :
+        '🧾 Estimation sur les prix DÉBOURS uniquement', 'bleu', 2500);
+}
+
 function onDpgfRepInline(i, val){
   const r = DPGF[i];
   r.repere = val.trim();
   if (r.repere){
-    const matchs = BASE.filter(b=> b.repere === r.repere);
+    const matchs = dpgfPool().filter(b=> b.repere === r.repere);
     if (matchs.length){
       const prix = matchs.map(m=> m.prix);
       const moy  = prix.reduce((a,b)=> a+b, 0) / prix.length;
@@ -2319,7 +2620,7 @@ function similarity(a, b) {
 }
 function findSuggestions(descriptifDPGF, lot) {
   const grouped = {};
-  BASE.forEach(r => {
+  dpgfPool().forEach(r => {
     if (!grouped[r.repere]) grouped[r.repere] = {rep: r.repere, lot: r.lot, desg: r.designation, prix: []};
     grouped[r.repere].prix.push(r.prix);
   });
@@ -2357,7 +2658,7 @@ function filtrerRep(){
   const srch = ($('selSearch').value||'').toLowerCase();
   const lot  = $('selLot').value;
   const grouped = {};
-  BASE.forEach(r=>{
+  dpgfPool().forEach(r=>{
     if (!grouped[r.repere])
       grouped[r.repere] = {rep:r.repere, lot:r.lot, desg:r.designation, unite:r.unite, prix:[], prixAll:[]};
     grouped[r.repere].prixAll.push(r.prix);
@@ -2409,7 +2710,7 @@ function selRep(i, rep, moy, dernier, cnt, unite){
   const el = $('ri'+i); if (el) el.classList.add('sel');
   gSel = {rep, moy, dernier, cnt, unite};
   gSelHisto = null;
-  const matchs = BASE.map((b, idx) => ({b, idx})).filter(x => x.b.repere === rep);
+  const matchs = dpgfPool().map((b, idx) => ({b, idx})).filter(x => x.b.repere === rep);
   $('histoList').innerHTML = matchs.map((x, hi) => `
     <div class="histo-item" id="hi${hi}" data-prix="${x.b.prix}" data-idx="${x.idx}">
       <span>${esc(x.b.date) || '—'}</span>
@@ -2488,8 +2789,9 @@ function isRowValid(r){
   return r.repere.trim() && r.lot && r.designation.trim() && parseFloat(r.prix) > 0;
 }
 function isMasseAnomaly(r) {
+  const masseType = $('masseTypeSel') ? $('masseTypeSel').value : 'nc';
   if (!r.repere.trim() || !parseFloat(r.prix)) return false;
-  const matchs = BASE.filter(b => b.repere === r.repere.trim());
+  const matchs = BASE.filter(b => b.repere === r.repere.trim() && normTypePrix(b) === masseType);
   if (matchs.length < 2) return false;
   const prixs = matchs.map(b => b.prix);
   const min = Math.min(...prixs), max = Math.max(...prixs);
@@ -2600,8 +2902,10 @@ async function validerMasse() {
   if (!confirm(`Importer ${valides.length} ligne${valides.length > 1 ? 's' : ''} dans la base ?`)) return;
   await snapshotIfImportant('Avant saisie masse');
   pushUndo(`Saisie masse (${valides.length} prix)`);
+  const typeSel = $('masseTypeSel') ? $('masseTypeSel').value : 'nc';
   valides.forEach(r => {
-    BASE.push({
+    const obj = {
+      id: genId(),
       repere: r.repere.trim(),
       lot: r.lot,
       designation: r.designation.trim(),
@@ -2609,7 +2913,9 @@ async function validerMasse() {
       prix: parseFloat(r.prix),
       date: r.date,
       projet: r.projet.trim()
-    });
+    };
+    if (typeSel !== 'nc') obj.typePrix = typeSel;
+    BASE.push(obj);
   });
   // Ne garder que les invalides
   MASSE = MASSE.filter(r => !isRowValid(r));
@@ -2731,11 +3037,20 @@ async function importerTrameMasse() {
 /* ============================================================
    ★ v2.4 ★ RATIOS — avec lignes expansibles + sparkline
    ============================================================ */
+function setRatioTypeFilter(v){
+  PREFS.ratioTypeFilter = v;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  renderRatios();
+}
+
 function renderRatios(){
-  // ★ v2.6 — vue "par type d'ouvrage" (regroupement par similarité) : voir renderer/ratios-plus.js
+  const ts = $('ratioTypeSel'); if (ts) ts.value = PREFS.ratioTypeFilter || 'tous';
+  const bn = $('btnNewCustomRatio'); if (bn) bn.style.display = window.RATIO_VIEW === 'perso' ? '' : 'none';
+  // ★ v2.6 — vues "par type d'ouvrage" et "mes ratios" : voir renderer/ratios-plus.js
   if (window.RATIO_VIEW === 'types' && typeof renderRatiosTypes === 'function') { renderRatiosTypes(); return; }
+  if (window.RATIO_VIEW === 'perso' && typeof renderRatiosPerso === 'function') { renderRatiosPerso(); return; }
   const grouped = {};
-  BASE.forEach(r => {
+  ratioPool().forEach(r => {
     if (!grouped[r.repere]) grouped[r.repere] = {
       rep: r.repere, lot: r.lot, desg: r.designation, unite: r.unite, items: []
     };
