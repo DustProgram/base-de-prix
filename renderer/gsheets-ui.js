@@ -19,10 +19,18 @@ let gsLastError = '';
 let gsLastSync = 0;
 let gsPollTimer = null;
 
+/* ★ v2.6.2 perf — l'ombre (état connu à la dernière sync) était re-parsée
+   depuis localStorage à chaque rafraîchissement du bandeau (~1 Mo de JSON à
+   4600 prix, après chaque sauvegarde). Elle vit maintenant en mémoire. */
+let _gsShadowCache = null;
 function gsLoadShadow() {
-  try { return JSON.parse(localStorage.getItem('bp_gs_shadow') || '{}'); } catch (e) { return {}; }
+  if (_gsShadowCache) return _gsShadowCache;
+  try { _gsShadowCache = JSON.parse(localStorage.getItem('bp_gs_shadow') || '{}'); }
+  catch (e) { _gsShadowCache = {}; }
+  return _gsShadowCache;
 }
 function gsSaveShadow(s) {
+  _gsShadowCache = s;
   try { localStorage.setItem('bp_gs_shadow', JSON.stringify(s)); } catch (e) {}
 }
 

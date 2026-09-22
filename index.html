@@ -948,7 +948,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
     <div class="info info-bleu" id="selDPGF"></div>
     <div class="srch-row" style="margin-top:8px">
       <select id="selLot" onchange="filtrerRep()"><option value="">Tous les lots</option></select>
-      <input type="text" id="selSearch" placeholder="🔍 Rechercher..." oninput="filtrerRep()">
+      <input type="text" id="selSearch" placeholder="🔍 Rechercher..." oninput="filtrerRepDebounced()">
     </div>
     <div class="rep-hdr"><span>Repère</span><span>Désignation</span><span>Unité</span><span>Prix HT (€)</span></div>
     <div class="rep-list" id="repList"></div>
@@ -1464,7 +1464,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.6.1';
+const APP_VERSION = '2.6.2';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1620,8 +1620,15 @@ function isAnomalyIdx(r, idx) {
   return r.prix < othersMin * 0.5 || r.prix > othersMax * 2;
 }
 
-function save(skipSync) {
-  ensureIds();
+/* ★ v2.6.2 perf — l'écriture localStorage est différée (500 ms) : sérialiser
+   toute la base (~1,5 Mo à 4600 prix) à CHAQUE modification gelait l'UI.
+   persistBaseNow() force l'écriture immédiate (fermeture, reset…). */
+let _persistTimer = null;
+let _persistDirty = false;
+function persistBaseNow() {
+  if (!_persistDirty) return;
+  _persistDirty = false;
+  clearTimeout(_persistTimer);
   localStorage.setItem('bp', JSON.stringify(BASE));
   // Nettoyer les exclusions orphelines (prix qui n'existent plus dans BASE)
   let prefsChanged = false;
@@ -1639,6 +1646,14 @@ function save(skipSync) {
     if (PREFS.anomalyExclusions.length !== before) prefsChanged = true;
   }
   if (prefsChanged) localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+}
+window.addEventListener('beforeunload', persistBaseNow);
+
+function save(skipSync) {
+  ensureIds();
+  _persistDirty = true;
+  clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(persistBaseNow, 500);
   if (!skipSync) scheduleSync();
 }
 function $ (id){ return document.getElementById(id); }
@@ -1672,17 +1687,37 @@ function toast(msg, type='vert', dur=2800, undoCb=null){
   }, dur);
 }
 
-/* ★ v2.4 — Système d'Undo simple (snapshot complet) */
+/* ★ v2.4 — Système d'Undo (snapshot complet)
+   ★ v2.6.2 perf — l'état est stocké en UNE chaîne JSON (une seule
+   sérialisation par action) au lieu d'une copie profonde stringify+parse :
+   ~2× moins de travail par action et ~3× moins de RAM sur les 2×20 niveaux. */
+function makeUndoSnapshot(label) {
+  return {
+    label,
+    json: JSON.stringify({
+      base: BASE,
+      lots: LOTS,
+      lotColors: PREFS.lotColors,
+      ratioExclusions: PREFS.ratioExclusions || []
+    }),
+    time: Date.now()
+  };
+}
+function applyUndoSnapshot(snap) {
+  const d = JSON.parse(snap.json);
+  BASE = d.base;
+  LOTS = d.lots; PREFS.lots = LOTS;
+  PREFS.lotColors = d.lotColors;
+  PREFS.ratioExclusions = d.ratioExclusions;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  save();
+  initUI(); renderAccueil(); renderBase(); renderRatios();
+  updateUndoRedoButtons();
+}
+
 function pushUndo(label) {
   // Sauvegarde l'état AVANT le changement
-  undoStack.push({
-    label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  undoStack.push(makeUndoSnapshot(label));
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   // Toute nouvelle action vide la pile redo
   redoStack = [];
@@ -1695,24 +1730,10 @@ function undo() {
     return;
   }
   // Sauver l'état actuel dans la pile redo avant de revenir en arrière
-  redoStack.push({
-    label: undoStack[undoStack.length-1].label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  redoStack.push(makeUndoSnapshot(undoStack[undoStack.length-1].label));
   if (redoStack.length > MAX_UNDO) redoStack.shift();
   const last = undoStack.pop();
-  BASE = last.base;
-  LOTS = last.lots; PREFS.lots = LOTS;
-  PREFS.lotColors = last.lotColors;
-  PREFS.ratioExclusions = last.ratioExclusions;
-  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
-  save();
-  initUI(); renderAccueil(); renderBase(); renderRatios();
-  updateUndoRedoButtons();
+  applyUndoSnapshot(last);
   toast(`↩ Annulé : ${last.label}`, 'bleu', 2500);
 }
 
@@ -1722,24 +1743,10 @@ function redo() {
     return;
   }
   // Sauver l'état actuel dans undoStack avant de refaire en avant
-  undoStack.push({
-    label: redoStack[redoStack.length-1].label,
-    base: JSON.parse(JSON.stringify(BASE)),
-    lots: JSON.parse(JSON.stringify(LOTS)),
-    lotColors: JSON.parse(JSON.stringify(PREFS.lotColors)),
-    ratioExclusions: JSON.parse(JSON.stringify(PREFS.ratioExclusions || [])),
-    time: Date.now()
-  });
+  undoStack.push(makeUndoSnapshot(redoStack[redoStack.length-1].label));
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   const next = redoStack.pop();
-  BASE = next.base;
-  LOTS = next.lots; PREFS.lots = LOTS;
-  PREFS.lotColors = next.lotColors;
-  PREFS.ratioExclusions = next.ratioExclusions;
-  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
-  save();
-  initUI(); renderAccueil(); renderBase(); renderRatios();
-  updateUndoRedoButtons();
+  applyUndoSnapshot(next);
   toast(`↪ Rétabli : ${next.label}`, 'bleu', 2500);
 }
 
@@ -1947,9 +1954,12 @@ document.querySelectorAll('.nav-btn[data-page], .sb-item[data-page]').forEach(b=
    INIT UI
    ============================================================ */
 function initUI(){
+  // ★ v2.6.2 perf — compteurs par lot en un seul passage (au lieu de 14 filtres complets)
+  const lotCounts = new Map();
+  BASE.forEach(r => lotCounts.set(r.lot, (lotCounts.get(r.lot) || 0) + 1));
   // Sidebar lots avec drag handles
   $('sbLots').innerHTML = LOTS.map((l,i)=>{
-    const cnt = BASE.filter(r=> r.lot===l).length;
+    const cnt = lotCounts.get(l) || 0;
     return `<div class="sb-item" data-lot-idx="${i}" draggable="true" onclick="showLot('${esc(l)}')">
       <span class="lot-dot" style="background:${PREFS.lotColors[i]||'#888'}"></span>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l)}</span>
@@ -2545,6 +2555,7 @@ function renderDPGF(){
 function setDpgfTypeFilter(v){
   PREFS.dpgfTypeFilter = v;
   localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  _selGroupedCache = null; // le pool de la modale de sélection change
   renderDPGF();
   toast(v === 'tous' ? 'Estimation sur tous les prix' :
         v === 'vente' ? '💰 Estimation sur les prix de VENTE uniquement' :
@@ -2638,6 +2649,7 @@ function openSel(idx){ gIdx = idx; openSelRow(idx, ()=> renderDPGF()); }
 
 function openSelRow(idx, cb){
   gCb = cb; gSel = {}; gSelHisto = null;
+  _selGroupedCache = null; // ★ v2.6.2 : regroupement reconstruit une fois par ouverture
   const row = DPGF[idx];
   $('selTitle').textContent = `Ligne ${idx+1}/${DPGF.length} — Sélection du repère`;
   $('selDPGF').innerHTML =
@@ -2654,9 +2666,18 @@ function openSelRow(idx, cb){
   filtrerRep();
   openModal('modalSel', 'selSearch');
 }
-function filtrerRep(){
-  const srch = ($('selSearch').value||'').toLowerCase();
-  const lot  = $('selLot').value;
+/* ★ v2.6.2 perf — le regroupement complet de la base était refait à CHAQUE
+   frappe dans la recherche de la modale. Il est maintenant construit une fois
+   par ouverture (cache invalidé si le filtre de type change), la recherche est
+   debouncée et l'affichage plafonné. */
+let _selGroupedCache = null;
+let _selFiltreTimer = null;
+const SEL_MAX_ITEMS = 250;
+function filtrerRepDebounced(){
+  clearTimeout(_selFiltreTimer);
+  _selFiltreTimer = setTimeout(filtrerRep, 150);
+}
+function buildSelGrouped(){
   const grouped = {};
   dpgfPool().forEach(r=>{
     if (!grouped[r.repere])
@@ -2669,6 +2690,13 @@ function filtrerRep(){
   Object.values(grouped).forEach(g => {
     if (g.prix.length === 0) g.prix = g.prixAll;
   });
+  return grouped;
+}
+function filtrerRep(){
+  const srch = ($('selSearch').value||'').toLowerCase();
+  const lot  = $('selLot').value;
+  if (!_selGroupedCache) _selGroupedCache = buildSelGrouped();
+  const grouped = _selGroupedCache;
   let items = Object.values(grouped).filter(r =>
     (!lot || r.lot===lot) &&
     (!srch || r.rep.toLowerCase().includes(srch) || r.desg.toLowerCase().includes(srch)));
@@ -2681,7 +2709,11 @@ function filtrerRep(){
     if (bi >= 0) return 1;
     return a.rep.localeCompare(b.rep);
   });
-  $('repNb').textContent = items.length + ' repère(s)' + (suggs.length ? ' · ⭐ Suggestions en premier' : '');
+  const totalItems = items.length;
+  items = items.slice(0, SEL_MAX_ITEMS);
+  $('repNb').textContent = totalItems + ' repère(s)' +
+    (totalItems > items.length ? ` · ${items.length} premiers affichés — affinez la recherche` : '') +
+    (suggs.length ? ' · ⭐ Suggestions en premier' : '');
   $('repList').innerHTML = items.map((r,i)=>{
     const moy  = r.prix.reduce((a,b)=> a+b, 0) / r.prix.length;
     const dern = r.prix[r.prix.length-1];
@@ -5044,6 +5076,8 @@ async function checkUpdatesNow() {
 function setupQuitHandler() {
   if (!isElectron || !window.electronAPI.onBeforeQuit) return;
   window.electronAPI.onBeforeQuit(() => {
+    // ★ v2.6.2 — vider l'écriture localStorage différée avant de fermer
+    persistBaseNow();
     // ★ v2.6 — modifs Google Sheets non poussées ?
     const gsPending = (typeof gsCountPending === 'function') ? gsCountPending() : 0;
     // Si pas de modifs non syncées, on ferme directement

@@ -11,6 +11,7 @@ let IA_ROWS = [];
 try { IA_ROWS = JSON.parse(localStorage.getItem('bp_ia_rows') || '[]'); } catch (e) { IA_ROWS = []; }
 let IA_RUNNING = false;
 let IA_PAUSED = false;
+let iaRowsLimit = 300; // ★ v2.6.2 : pagination du tableau de validation
 let IA_SESSION_COST = 0;
 let iaUid = 0;
 
@@ -257,22 +258,32 @@ function iaSetType(v) {
 }
 
 /* ── Drapeaux qualité (comparaison au sein du même type de prix) ── */
-function iaIsDoublon(row) {
+/* ★ v2.6.2 perf — index pré-calculés en un passage sur BASE, au lieu d'un
+   parcours complet de la base PAR LIGNE extraite à chaque rendu. */
+function iaBuildFlagIndexes() {
   const t = iaCurrentType();
-  return BASE.some(r => r.repere === row.repere &&
-    normTypePrix(r) === t &&
-    (r.date || '') === (row.date || '') &&
-    (r.projet || '') === (row.projet || '') &&
-    Math.abs((r.prix || 0) - row.prix) < 0.005);
+  const dupSet = new Set();
+  const ranges = new Map();
+  for (const r of BASE) {
+    if (normTypePrix(r) !== t) continue;
+    dupSet.add(`${r.repere}||${r.date || ''}||${r.projet || ''}||${(r.prix || 0).toFixed(2)}`);
+    let g = ranges.get(r.repere);
+    if (!g) { g = { count: 0, min: Infinity, max: -Infinity }; ranges.set(r.repere, g); }
+    g.count++;
+    if (r.prix < g.min) g.min = r.prix;
+    if (r.prix > g.max) g.max = r.prix;
+  }
+  return {
+    isDup: row => dupSet.has(`${row.repere}||${row.date || ''}||${row.projet || ''}||${row.prix.toFixed(2)}`),
+    isAnom: row => {
+      const g = ranges.get(row.repere);
+      return !!g && g.count >= 3 && (row.prix < g.min * 0.5 || row.prix > g.max * 2);
+    }
+  };
 }
-function iaIsAnomalie(row) {
-  const t = iaCurrentType();
-  const matchs = BASE.filter(x => x.repere === row.repere && normTypePrix(x) === t);
-  if (matchs.length < 3) return false;
-  const prix = matchs.map(x => x.prix);
-  const min = Math.min(...prix), max = Math.max(...prix);
-  return row.prix < min * 0.5 || row.prix > max * 2;
-}
+// Versions unitaires (mêmes règles), utilisées hors rendu
+function iaIsDoublon(row) { return iaBuildFlagIndexes().isDup(row); }
+function iaIsAnomalie(row) { return iaBuildFlagIndexes().isAnom(row); }
 
 /* ── Rendu ── */
 function renderImportIA() {
@@ -318,6 +329,17 @@ function renderImportIA() {
   const nbCoches = IA_ROWS.filter(r => r.include).length;
   $('iaRowsCount').textContent = `(${IA_ROWS.length} lignes, ${nbCoches} cochées)`;
 
+  // ★ v2.6.2 perf — index doublons/anomalies construits UNE fois par rendu,
+  // et affichage paginé par tranches de 300 lignes
+  const flags = iaBuildFlagIndexes();
+  const shown = IA_ROWS.slice(0, iaRowsLimit);
+  const moreHtml = IA_ROWS.length > shown.length
+    ? `<tr><td colspan="11" style="text-align:center;padding:10px">
+         <button class="btn btn-gris" onclick="iaRowsLimit+=1000;renderImportIA()">⬇ Afficher 1000 de plus (${IA_ROWS.length - shown.length} restantes)</button>
+         <button class="btn btn-gris" onclick="iaRowsLimit=Infinity;renderImportIA()">Tout afficher</button>
+       </td></tr>`
+    : '';
+
   $('tblIaRows').innerHTML =
     `<thead><tr>
       <th style="width:30px;text-align:center">☑</th>
@@ -325,9 +347,9 @@ function renderImportIA() {
       <th style="text-align:right">Prix HT</th><th>Date</th><th>Chantier</th>
       <th>Source</th><th style="width:60px">Alertes</th><th style="width:30px"></th>
     </tr></thead>
-    <tbody>${IA_ROWS.map((r, i) => {
-      const doublon = iaIsDoublon(r);
-      const anomalie = iaIsAnomalie(r);
+    <tbody>${shown.map((r, i) => {
+      const doublon = flags.isDup(r);
+      const anomalie = flags.isAnom(r);
       const basse = r.confiance === 'basse';
       const alerts = [
         anomalie ? '<span title="Prix très éloigné de l\'historique de ce repère">⚠️</span>' : '',
@@ -350,13 +372,17 @@ function renderImportIA() {
         <td><button class="btn btn-rouge" style="padding:1px 6px;font-size:10px"
             onclick="IA_ROWS.splice(${i},1);renderImportIA()">🗑</button></td>
       </tr>`;
-    }).join('')}</tbody>`;
-
-  // Édition par double-clic
-  $('tblIaRows').querySelectorAll('td.ia-edit').forEach(td => {
-    td.addEventListener('dblclick', () => iaEditCell(td));
-  });
+    }).join('') + moreHtml}</tbody>`;
 }
+
+// ★ v2.6.2 perf — édition par double-clic : un seul écouteur délégué
+document.addEventListener('DOMContentLoaded', () => {
+  const t = $('tblIaRows');
+  if (t) t.addEventListener('dblclick', e => {
+    const td = e.target.closest('td.ia-edit');
+    if (td) iaEditCell(td);
+  });
+});
 
 function iaEditCell(td) {
   const i = parseInt(td.dataset.i, 10), f = td.dataset.f;
@@ -398,7 +424,8 @@ function iaEditCell(td) {
 function iaCheckAll(v) { IA_ROWS.forEach(r => r.include = v); renderImportIA(); }
 function iaUncheckDoublons() {
   let n = 0;
-  IA_ROWS.forEach(r => { if (r.include && iaIsDoublon(r)) { r.include = false; n++; } });
+  const flags = iaBuildFlagIndexes(); // index construit une seule fois
+  IA_ROWS.forEach(r => { if (r.include && flags.isDup(r)) { r.include = false; n++; } });
   renderImportIA();
   toast(n ? `♻️ ${n} doublon(s) décoché(s)` : 'Aucun doublon détecté', n ? 'orange' : 'vert', 2500);
 }

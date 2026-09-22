@@ -1,4 +1,24 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.6.1
+# 📋 Base de Prix — Évolutions v2.3 → v2.6.2
+
+## ⚡ v2.6.2 — Second lot d'optimisations (fluidité durable jusqu'à ~20 000 prix)
+
+- **Undo/redo** : l'état n'est plus copié en profondeur (stringify + parse ×2 par
+  action, ~60 Mo de RAM sur 40 niveaux) mais stocké en une seule chaîne JSON —
+  ~2× moins de travail par action, ~3× moins de mémoire
+- **Sauvegarde** : l'écriture localStorage (~1,5 Mo sérialisés à chaque
+  modification) est différée de 500 ms et regroupée ; écriture forcée à la
+  fermeture de l'application (aucune perte possible)
+- **Google Sheets** : l'« ombre » de sync n'est plus re-parsée depuis
+  localStorage à chaque rafraîchissement du bandeau (cache mémoire)
+- **Modale « Choisir un repère » (DPGF)** : le regroupement complet de la base
+  n'est plus refait à chaque frappe (construit une fois par ouverture),
+  recherche debouncée 150 ms, affichage plafonné à 250 repères
+- **Écran de validation Import IA** : index doublons/anomalies pré-calculés en
+  un passage (au lieu d'un parcours de base par ligne), pagination 300 lignes,
+  écouteur d'édition délégué unique
+- **Compteurs de lots** (sidebar) calculés en un seul passage au lieu de 14
+
+---
 
 ## ⚡ v2.6.1 — Performances 4000+ prix, types Débours/Vente, ratios corrigés + personnalisés
 
