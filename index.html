@@ -1464,7 +1464,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.6.2';
+const APP_VERSION = '2.6.3';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -4212,10 +4212,19 @@ function processDPGFwb(wb) {
       const repIdx  = r.findIndex(c => /^(rep[eè]re|rep|n°\s*art|num[eé]ro?|n°|art|ref|article|code|item|poste)\.?$/i.test(c));
       const descIdx = r.findIndex(c => /(d[eé]sign|descript|libell|article|nature|prestation|ouvrage|d[eé]nomination)/i.test(c));
       const uIdx    = r.findIndex(c => /^(u|unit[eé]?s?|un|um)\.?$/i.test(c));
-      const qteIdx  = r.findIndex(c => /^(qt[eé]?s?|quant.*|nombre|nb)\.?$/i.test(c));
-      const prixIdx = r.findIndex(c => /(prix\s*unit|prix|pu|p\.u|tarif|montant)/i.test(c) && !/total|h\.?t|ttc|produit/i.test(c));
+      // ★ v2.6.3 : reconnaît aussi "Q", "Q MOE", "Q ENT", "Qté", "Quantités"…
+      const qteIdx  = r.findIndex(c => /^(qt[eé]?s?\.?|quant\S*|nombre|nb\.?|q)(\s.*)?$/i.test(c));
+      // ★ v2.6.3 fix : "PRIX UNITAIRE H.T." était REJETÉ par l'exclusion h.t →
+      // aucune colonne prix trouvée → 0 ligne importée. On cherche d'abord un
+      // vrai "prix unitaire / PU" (HT/TTC acceptés), sinon un "prix/tarif"
+      // qui n'est pas un total/montant.
+      let prixIdx = r.findIndex(c => /p\.?\s*u\b|prix\s*unit/i.test(c) && !/total|montant/i.test(c));
+      if (prixIdx < 0) prixIdx = r.findIndex(c => /(prix|tarif)/i.test(c) && !/total|montant|produit/i.test(c));
 
-      if (descIdx >= 0 && (repIdx >= 0 || uIdx >= 0 || qteIdx >= 0)) {
+      // ★ v2.6.3 : au moins 2 marqueurs (repère/unité/qté/prix) en plus de la
+      // désignation, pour ne pas prendre une feuille de récap pour une DPGF
+      const nbMarqueurs = [repIdx, uIdx, qteIdx, prixIdx].filter(x => x >= 0).length;
+      if (descIdx >= 0 && nbMarqueurs >= 2) {
         headerRow = i;
         cols.rep = repIdx;
         cols.u = uIdx;
@@ -4398,9 +4407,15 @@ function importDPGFSheets() {
 
       // Lire les autres champs
       const uniteVal = cols.u >= 0 ? String(r[cols.u]||'').trim() : '';
-      const qteVal   = cols.qte >= 0 ? parseFloat(String(r[cols.qte]||'').replace(',','.')) : NaN;
-      const prixVal  = cols.prix >= 0 ? parseFloat(String(r[cols.prix]||'').replace(',','.')) : NaN;
+      const qteVal   = cols.qte >= 0 ? parseFloat(String(r[cols.qte]||'').replace(/\s/g,'').replace(',','.')) : NaN;
+      const prixVal  = cols.prix >= 0 ? parseFloat(String(r[cols.prix]||'').replace(/\s/g,'').replace(',','.')) : NaN;
       const hasPrice = !isNaN(prixVal) && prixVal > 0;
+      // ★ v2.6.3 fix : une DPGF à chiffrer a sa colonne prix VIDE — exiger un
+      // prix pour reconnaître un article donnait 0 ligne. Un article se
+      // reconnaît par : unité OU quantité OU prix renseigné (un titre de
+      // chapitre n'a ni unité ni quantité).
+      const hasQte  = !isNaN(qteVal) && qteVal > 0;
+      const hasData = hasPrice || hasQte || (uniteVal !== '' && uniteVal.length <= 12);
 
       // === FILTRES ===
       // Lignes vides
@@ -4412,12 +4427,14 @@ function importDPGFSheets() {
 
       // === LOGIQUE PARENT/ENFANT ===
 
-      // CAS A : Ligne avec REPÈRE + TITRE + PRIX → article simple
-      if (repereVal && titreVal && hasPrice) {
+      // CAS A : Ligne avec REPÈRE + TITRE + DONNÉES (unité/qté/prix) → article
+      // (★ v2.6.3 : avant, seul un PRIX déjà renseigné comptait — une DPGF
+      //  vierge à chiffrer donnait donc 0 ligne)
+      if (repereVal && titreVal && hasData) {
         DPGF.push({
           sheet: s.name,
           repDPGF: repereVal,
-          descriptif: titreVal,
+          descriptif: titreVal + (detailVal ? ' - ' + detailVal : ''),
           unite: uniteVal,
           qte: isNaN(qteVal) ? 0 : qteVal,
           repere: '', prix: 0, total: 0, mode: 'exact'
@@ -4426,9 +4443,9 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS B : Ligne avec REPÈRE + TITRE mais SANS prix → c'est un PARENT (titre d'article)
+      // CAS B : Ligne avec REPÈRE + TITRE mais SANS données → c'est un PARENT (titre d'article)
       // Par exemple : "2.1.2 | Clôture de chantier" puis ses 4 sous-items en-dessous
-      if (repereVal && titreVal && !hasPrice) {
+      if (repereVal && titreVal && !hasData) {
         // Vérifier si c'est une ligne de section (genre "2.1 TRAVAUX PREPARATOIRES")
         // Ces lignes ont typiquement un repère court (1-2 niveaux) + texte en majuscules
         const isSection = (
@@ -4445,8 +4462,8 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS C : Ligne SANS repère mais avec un DÉTAIL + un PRIX → sous-item du parent courant
-      if (!repereVal && detailVal && hasPrice && currentParent) {
+      // CAS C : Ligne SANS repère mais avec un DÉTAIL + des données → sous-item du parent courant
+      if (!repereVal && detailVal && hasData && currentParent) {
         DPGF.push({
           sheet: s.name,
           repDPGF: currentParent.repere,
@@ -4458,14 +4475,17 @@ function importDPGFSheets() {
         continue;
       }
 
-      // CAS D : Ligne SANS repère mais avec un TITRE (descStart) + un PRIX
-      // → cas où on voit un titre directement avec son prix sans repère explicite
-      // → on prend le titre comme désignation et on hérite du repère parent (s'il y en a un)
-      if (!repereVal && titreVal && hasPrice && currentParent) {
+      // CAS D : Ligne SANS repère mais avec un TITRE (descStart) + des données
+      // → hérite du parent s'il existe ; sinon article autonome
+      // (★ v2.6.3 : les feuilles SANS colonne repère tombaient toutes ici sans
+      //  jamais avoir de parent → 0 ligne. On importe maintenant sans parent.)
+      if (!repereVal && titreVal && hasData) {
         DPGF.push({
           sheet: s.name,
-          repDPGF: currentParent.repere,
-          descriptif: `${currentParent.titre} - ${titreVal}${detailVal ? ' ' + detailVal : ''}`,
+          repDPGF: currentParent ? currentParent.repere : '',
+          descriptif: currentParent
+            ? `${currentParent.titre} - ${titreVal}${detailVal ? ' ' + detailVal : ''}`
+            : titreVal + (detailVal ? ' - ' + detailVal : ''),
           unite: uniteVal,
           qte: isNaN(qteVal) ? 0 : qteVal,
           repere: '', prix: 0, total: 0, mode: 'exact'
@@ -4483,7 +4503,15 @@ function importDPGFSheets() {
   initUI(); showPage('dpgf');
   let msg = `📥 ${DPGF.length} ligne(s) importée(s) depuis ${totalSheets} feuille(s)`;
   if (nbForced) msg += ` (dont ${nbForced} en détection manuelle)`;
-  toast(msg, 'vert', 4000);
+  if (DPGF.length === 0 && totalSheets > 0) {
+    // ★ v2.6.3 : diagnostic quand rien ne sort malgré des feuilles cochées
+    console.warn('[DPGF] 0 ligne importée. Diagnostic par feuille :');
+    detectedSheets.filter(x => x.checked).forEach(x =>
+      console.warn(`  - "${x.name}" : en-tête ligne ${x.headerRow + 1}, colonnes`, x.cols));
+    toast('⚠️ Feuilles lues mais aucune ligne exploitable — ouvrez la console (Ctrl+Maj+I) et envoyez le diagnostic [DPGF]', 'orange', 7000);
+  } else {
+    toast(msg, 'vert', 4000);
+  }
 }
 
 async function exportDPGF() {

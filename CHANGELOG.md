@@ -1,4 +1,31 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.6.2
+# 📋 Base de Prix — Évolutions v2.3 → v2.6.3
+
+## 🐛 v2.6.3 — Fix import DPGF « X feuilles, 0 ligne » (validé sur DPGF réelle)
+
+Retour terrain : une DPGF de 14 feuilles était bien détectée mais **0 ligne**
+n'en sortait. Deux causes cumulées, plus deux améliorations :
+
+- **La colonne prix n'était jamais reconnue** quand l'en-tête contenait « H.T. »
+  (« PRIX UNITAIRE H.T. », « PU HT »…) : l'exclusion anti-totaux rejetait `h.t`.
+  Corrigé : « prix unitaire / PU » accepté avec HT/TTC ; seuls total/montant
+  restent exclus.
+- **Une DPGF à chiffrer (colonne prix vide) donnait 0 ligne** : depuis la
+  v2.5.3, une ligne sans prix était classée « titre parent » et jamais importée.
+  Un article est maintenant reconnu par : repère + désignation + (unité OU
+  quantité OU prix). Les feuilles **sans colonne repère** sont aussi importées
+  (avant : tout attendait un parent qui n'existait pas → 0 ligne).
+- **Colonnes quantité « Q », « Q MOE », « Q ENT »** désormais reconnues (en plus
+  de Qté/Quantités/Nb).
+- **Détection plus stricte** : une feuille n'est proposée comme DPGF que si
+  l'en-tête porte au moins 2 marqueurs (repère/unité/qté/prix) en plus de la
+  désignation — les feuilles « Récap » ne sont plus des faux positifs.
+- Si malgré tout 0 ligne sort, un **diagnostic par feuille** est affiché dans la
+  console (Ctrl+Maj+I) pour analyse.
+
+Validé sur la DPGF réelle du retour terrain : 13 feuilles importées,
+**4022 lignes** extraites (unités + quantités), récap TCE écarté.
+
+---
 
 ## ⚡ v2.6.2 — Second lot d'optimisations (fluidité durable jusqu'à ~20 000 prix)
 

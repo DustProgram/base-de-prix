@@ -1,6 +1,6 @@
 {
   "name": "base-de-prix",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "Outil de gestion de base de prix et DPGF",
   "main": "main.js",
   "author": "Nathan RAMEDACE",
