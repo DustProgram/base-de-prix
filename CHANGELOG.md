@@ -1,4 +1,23 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.7.0
+# 📋 Base de Prix — Évolutions v2.3 → v2.7.1
+
+## 🔀 v2.7.1 — Modèles IA configurables + bascule automatique (fix Gemini/Mistral)
+
+Retour terrain : Gemini répondait « gemini-2.5-pro n'est plus disponible pour les
+nouveaux utilisateurs » et Mistral « modèle non disponible dans votre palier
+d'abonnement » — 126 lots en erreur.
+
+- **Bascule automatique de modèle** : quand l'API signale un modèle indisponible,
+  l'app retente immédiatement avec le modèle suggéré par l'API (Gemini) ou un
+  modèle du palier accessible (Mistral → `mistral-small-latest`), mémorise ce qui
+  fonctionne (session + Paramètres) et vous prévient une fois
+- **Modèles configurables** : Paramètres → 🤖 IA → « ⚙️ Modèles (avancé) » — un
+  champ par fournisseur (vide = défaut de l'app), validé côté processus principal
+- Défaut Gemini mis à jour : `gemini-3.1-pro-preview` (recommandation Google pour
+  les nouvelles clés)
+- **Chiffrage** : arrêt propre si la même erreur revient sur deux lots consécutifs
+  (fini les 126 erreurs identiques empilées)
+
+---
 
 ## ⚡ v2.7.0 — Chiffrage rapide IA, choix du fournisseur (Claude/Gemini/Mistral), page DPGF fluide
 

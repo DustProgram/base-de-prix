@@ -357,7 +357,13 @@ function resolveProvider(provider) {
   return { provider: p, apiKey }
 }
 
-ipcMain.handle('ia-extract', async (e, { provider, kind, filePath, base64, text, filename, lots, hints }) => {
+// ★ v2.7.1 — modèle personnalisé (Paramètres) : validé avant usage
+function safeModel(m) {
+  m = String(m || '').trim()
+  return /^[a-zA-Z0-9._\/-]{3,80}$/.test(m) ? m : ''
+}
+
+ipcMain.handle('ia-extract', async (e, { provider, model, kind, filePath, base64, text, filename, lots, hints }) => {
   try {
     const rp = resolveProvider(provider)
     if (rp.error) return { ok: false, error: rp.error }
@@ -365,18 +371,18 @@ ipcMain.handle('ia-extract', async (e, { provider, kind, filePath, base64, text,
       if (!fs.existsSync(filePath)) return { ok: false, error: 'Fichier introuvable : ' + filePath }
       base64 = fs.readFileSync(filePath).toString('base64')
     }
-    return await extractPrices({ provider: rp.provider, apiKey: rp.apiKey, kind, base64, text, filename, lots, hints })
+    return await extractPrices({ provider: rp.provider, apiKey: rp.apiKey, model: safeModel(model), kind, base64, text, filename, lots, hints })
   } catch (err) {
     return { ok: false, error: err.message }
   }
 })
 
 // ★ v2.7 — chiffrage rapide d'un lot de lignes DPGF
-ipcMain.handle('ia-chiffrage', async (e, { provider, lignes, projet }) => {
+ipcMain.handle('ia-chiffrage', async (e, { provider, model, lignes, projet }) => {
   try {
     const rp = resolveProvider(provider)
     if (rp.error) return { ok: false, error: rp.error }
-    return await chiffrerLignes({ provider: rp.provider, apiKey: rp.apiKey, lignes, projet })
+    return await chiffrerLignes({ provider: rp.provider, apiKey: rp.apiKey, model: safeModel(model), lignes, projet })
   } catch (err) {
     return { ok: false, error: err.message }
   }

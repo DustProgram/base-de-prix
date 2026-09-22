@@ -34,6 +34,23 @@ const IA_PROVIDERS = {
   mistral: { label: 'Mistral', keyName: 'mistral_api_key',   input: 'prefMistralKey',  status: 'mistralKeyStatus', pdf: false }
 };
 function iaProvider() { return IA_PROVIDERS[PREFS.iaProvider] ? PREFS.iaProvider : 'claude'; }
+// ★ v2.7.1 — modèle personnalisé par fournisseur (vide = défaut de l'app)
+function iaModel(provider) { return ((PREFS.iaModels || {})[provider] || '').trim(); }
+function iaSetModel(provider, v) {
+  if (!PREFS.iaModels) PREFS.iaModels = {};
+  PREFS.iaModels[provider] = String(v || '').trim();
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+}
+// Quand l'API a basculé sur un autre modèle (ancien modèle indisponible),
+// on mémorise le modèle qui marche et on prévient une fois.
+function iaNoteModel(res, provider) {
+  if (res && res.ok && res.modelNote && res.model && iaModel(provider) !== res.model) {
+    iaSetModel(provider, res.model);
+    const inp = $('prefModel_' + provider);
+    if (inp) inp.value = res.model;
+    toast(`🔀 ${res.modelNote} — mémorisé dans Paramètres`, 'orange', 6000);
+  }
+}
 function iaSetProvider(v) {
   PREFS.iaProvider = IA_PROVIDERS[v] ? v : 'claude';
   localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
@@ -66,6 +83,10 @@ async function iaRefreshKeyStatus() {
   if (!isElectron) return;
   const sel = $('prefIaProvider');
   if (sel) sel.value = iaProvider();
+  for (const name of Object.keys(IA_PROVIDERS)) {
+    const inp = $('prefModel_' + name);
+    if (inp && document.activeElement !== inp) inp.value = iaModel(name);
+  }
   let hasCurrent = false;
   for (const [name, p] of Object.entries(IA_PROVIDERS)) {
     const has = await window.electronAPI.secretHas(p.keyName);
@@ -168,7 +189,7 @@ async function iaProcessQueue() {
   renderImportIA();
 
   try {
-    const payload = { provider: iaProvider(), filename: next.name, lots: LOTS, hints: {} };
+    const payload = { provider: iaProvider(), model: iaModel(iaProvider()), filename: next.name, lots: LOTS, hints: {} };
     if (next.kind === 'pdf') {
       if (!IA_PROVIDERS[iaProvider()].pdf) {
         throw new Error(`${IA_PROVIDERS[iaProvider()].label} ne lit pas les PDF — choisissez Claude ou Gemini dans Paramètres → 🤖 IA`);
@@ -189,6 +210,7 @@ async function iaProcessQueue() {
 
     const res = await window.electronAPI.iaExtract(payload);
     if (!res || !res.ok) throw new Error((res && res.error) || 'Erreur inconnue');
+    iaNoteModel(res, iaProvider());
 
     const doc = res.data;
     const added = (doc.lignes || []).map(l => iaMapLigne(l, doc, next.name)).filter(Boolean);

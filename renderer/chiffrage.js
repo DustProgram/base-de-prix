@@ -112,6 +112,7 @@ async function startChiffrage() {
   const projet = (DPGF[0] && DPGF[0].sheet) || '';
   const report = { date: new Date().toLocaleString('fr-FR'), provider: IA_PROVIDERS[provider].label, lignes: [], cout: 0, erreurs: [] };
   let done = 0;
+  let lastErrMsg = null;
 
   for (let b = 0; b < targets.length; b += CH_BATCH_SIZE) {
     if (chCancelled) break;
@@ -124,12 +125,23 @@ async function startChiffrage() {
       candidats: chCandidatesFor(DPGF[i].descriptif, digest)
     }));
 
-    const res = await window.electronAPI.iaChiffrage({ provider, lignes, projet });
+    const res = await window.electronAPI.iaChiffrage({ provider, model: iaModel(provider), lignes, projet });
     if (!res || !res.ok) {
-      report.erreurs.push(res && res.error || 'Erreur inconnue');
+      const errMsg = (res && res.error) || 'Erreur inconnue';
+      report.erreurs.push(errMsg);
       // Erreur de quota/clé : inutile d'enchaîner les lots
-      if (res && /clé|limite de débit/i.test(res.error || '')) { toast('❌ ' + res.error, 'rouge', 5000); break; }
+      if (/clé|limite de débit/i.test(errMsg)) { toast('❌ ' + errMsg, 'rouge', 5000); break; }
+      // ★ v2.7.1 — même erreur deux lots de suite (modèle indisponible, etc.) :
+      // on arrête au lieu d'empiler 100+ erreurs identiques
+      if (errMsg === lastErrMsg) {
+        report.erreurs.push('⛔ Arrêt du chiffrage : erreur identique sur deux lots consécutifs.');
+        toast('❌ ' + errMsg, 'rouge', 6000);
+        break;
+      }
+      lastErrMsg = errMsg;
     } else {
+      lastErrMsg = null;
+      iaNoteModel(res, provider);
       report.cout += res.costUSD || 0;
       for (const l of res.data.lignes || []) {
         const i = l.index;

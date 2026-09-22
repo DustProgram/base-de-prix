@@ -829,11 +829,26 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
       <div style="margin-bottom:10px">
         <label style="font-size:11px;font-weight:700">Fournisseur utilisé</label>
         <select id="prefIaProvider" onchange="iaSetProvider(this.value)" style="width:auto;min-width:280px">
-          <option value="claude">Claude (Anthropic) — claude-opus-5 · PDF ✅</option>
-          <option value="gemini">Gemini (Google) — gemini-2.5-pro · PDF ✅</option>
-          <option value="mistral">Mistral — mistral-large-latest · PDF ❌</option>
+          <option value="claude">Claude (Anthropic) · PDF ✅</option>
+          <option value="gemini">Gemini (Google) · PDF ✅</option>
+          <option value="mistral">Mistral · PDF ❌</option>
         </select>
       </div>
+      <details style="font-size:11px;margin-bottom:10px">
+        <summary style="cursor:pointer;color:var(--bleu);font-weight:600">⚙️ Modèles (avancé) — à changer si l'API signale un modèle indisponible</summary>
+        <div class="help-text" style="margin:6px 0">
+          Vide = modèle par défaut de l'app. Si un fournisseur répond « modèle indisponible / palier
+          d'abonnement », l'app <strong>bascule automatiquement</strong> sur le modèle suggéré et le mémorise ici.
+        </div>
+        <div class="form-grid">
+          <div><label>Modèle Claude</label>
+            <input type="text" id="prefModel_claude" placeholder="défaut : claude-opus-5" onchange="iaSetModel('claude', this.value)"></div>
+          <div><label>Modèle Gemini</label>
+            <input type="text" id="prefModel_gemini" placeholder="défaut : gemini-3.1-pro-preview" onchange="iaSetModel('gemini', this.value)"></div>
+          <div><label>Modèle Mistral</label>
+            <input type="text" id="prefModel_mistral" placeholder="défaut : mistral-large-latest" onchange="iaSetModel('mistral', this.value)"></div>
+        </div>
+      </details>
       <div class="form-grid">
         <div>
           <label>Clé API Claude <span id="iaKeyStatus" style="font-weight:400"></span>
@@ -1542,7 +1557,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.7.1';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1572,6 +1587,7 @@ PREFS.ratioTypeFilter = PREFS.ratioTypeFilter || 'tous';   // ★ v2.6.1 : ratio
 PREFS.lastTypePrix    = PREFS.lastTypePrix    || 'vente';  // ★ v2.6.1 : dernier type utilisé à la saisie
 PREFS.customRatios    = PREFS.customRatios    || [];       // ★ v2.6.1 : ratios définis par l'utilisateur
 PREFS.iaProvider      = PREFS.iaProvider      || 'claude'; // ★ v2.7 : fournisseur IA (claude/gemini/mistral)
+PREFS.iaModels        = PREFS.iaModels        || {};       // ★ v2.7.1 : modèle personnalisé par fournisseur
 
 // LOTS = liste active (référence dynamique vers PREFS.lots)
 let LOTS = PREFS.lots;
