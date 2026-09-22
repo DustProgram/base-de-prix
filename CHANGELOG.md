@@ -1,4 +1,37 @@
-# 📋 Base de Prix — Évolutions v2.3 → v2.7.1
+# 📋 Base de Prix — Évolutions v2.3 → v2.7.2
+
+## 📑 v2.7.2 — Feuilles DPGF, chiffrage par lot + parallèle, export à l'identique
+
+### 🐛 Fix : navigation entre les feuilles de la DPGF
+
+La pagination v2.7 coupait les feuilles suivantes (« je ne peux plus changer de
+feuille »). Nouveau **sélecteur de feuille** dans la page DPGF : « Toutes les
+feuilles » ou une feuille/lot précise, avec le nombre de lignes par feuille —
+la pagination s'applique dans la feuille choisie.
+
+### ⚡ Chiffrage IA : choix des lots + 3× plus rapide
+
+- **Cases à cocher par feuille/lot** dans la fenêtre de chiffrage (tout / rien /
+  au détail, avec le compte de lignes sans prix par feuille). Si une feuille est
+  filtrée dans la page, elle est pré-sélectionnée seule.
+- **3 lots de 30 lignes envoyés en parallèle** : le temps total est divisé par ~3
+  sur les grosses DPGF (les 4000 lignes du fichier de test : ~45 min → ~15 min)
+
+### 📤 Export DPGF dans la mise en forme d'ORIGINE
+
+L'export réécrit désormais le **classeur Excel d'origine** : mêmes feuilles,
+mêmes styles, fusions, largeurs et formules — la SEULE modification est
+l'écriture des prix unitaires dans la colonne PU des lignes chiffrées.
+
+- Chaque ligne importée mémorise sa feuille + sa ligne source, et la colonne PU
+  détectée par feuille
+- Fichier exporté : `<nom d'origine>_CHIFFREE.xlsx` (ou .xlsm, macros conservées)
+- Validé sur la DPGF réelle : 14 feuilles, prix écrits aux bonnes cellules,
+  cellules témoins et fusions inchangées
+- Si le classeur d'origine n'est plus en mémoire (app relancée) : export
+  récapitulatif de repli + invitation à recharger le fichier
+
+---
 
 ## 🔀 v2.7.1 — Modèles IA configurables + bascule automatique (fix Gemini/Mistral)
 

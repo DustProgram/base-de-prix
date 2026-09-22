@@ -553,7 +553,9 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   <div class="card hidden" id="dpgfCard">
     <div class="card-title">
       <span>Lignes DPGF <span id="dpgfStats"></span></span>
-      <span style="display:flex;align-items:center;gap:6px">
+      <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <select id="dpgfSheetSel" onchange="setDpgfSheetFilter(this.value)" style="width:auto;max-width:240px"
+                title="Afficher une seule feuille (lot) ou toutes"></select>
         <span style="font-size:10px;color:#888;font-weight:400">Affichage :</span>
         <div class="dpgf-mode-toggle" id="viewToggle">
           <button class="on" data-view="sections">📑 Par feuille</button>
@@ -1390,6 +1392,15 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
         <div style="font-size:10px;color:#666">⚠️ Écrase les prix existants de la DPGF (pas la base)</div></div>
       </label>
     </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;font-weight:700;display:flex;align-items:center;gap:8px">
+        📑 Feuilles / lots à chiffrer
+        <button class="btn btn-gris" style="font-size:9px;padding:2px 6px" onclick="chSheetsAll(true)">☑ Tout</button>
+        <button class="btn btn-gris" style="font-size:9px;padding:2px 6px" onclick="chSheetsAll(false)">☐ Rien</button>
+      </label>
+      <div id="chiffSheets" style="border:1px solid var(--bord);border-radius:5px;max-height:170px;overflow-y:auto;margin-top:4px;
+                                   display:grid;grid-template-columns:1fr 1fr;gap:0"></div>
+    </div>
     <div class="info info-orange" style="margin-top:10px;font-size:11px">
       L'IA s'appuie <strong>exclusivement sur votre base de prix</strong> (candidats trouvés par similarité,
       selon le filtre « Estimer avec » : <span id="chiffrageTypeLbl"></span>). Quand les dimensions diffèrent
@@ -1557,7 +1568,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.7.1';
+const APP_VERSION = '2.7.2';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1606,6 +1617,10 @@ let gCb    = null;
 let dpgfView = 'sections';
 let detectedSheets = [];
 let pendingDPGFwb = null;
+// ★ v2.7.2 — traçabilité du classeur source pour l'export à l'identique
+let dpgfSrcName = '';        // nom du fichier DPGF chargé
+let dpgfSheetCols = {};      // nom de feuille → colonnes détectées (dont prix)
+let dpgfSheetFilter = '';    // '' = toutes les feuilles (sélecteur de la page DPGF)
 let isElectron = !!window.electronAPI;
 let editingLotIdx = -1;
 let editingLotMode = 'add'; // 'add' ou 'edit'
@@ -2635,6 +2650,18 @@ function dpgfUpdateRow(i) {
   dpgfUpdateStats();
 }
 
+// ★ v2.7.2 — sélecteur de feuille : corrige "je ne peux plus changer de
+// feuille" (la pagination coupait les feuilles suivantes) et permet de
+// travailler lot par lot.
+function setDpgfSheetFilter(v){
+  dpgfSheetFilter = v;
+  dpgfRenderLimit = DPGF_PAGE_SIZE;
+  renderDPGF();
+}
+function dpgfSheetNames(){
+  return [...new Set(DPGF.map(r => r.sheet || '(sans nom)'))];
+}
+
 function renderDPGF(){
   dpgfUpdateStats();
   if (!DPGF.length){
@@ -2644,8 +2671,24 @@ function renderDPGF(){
   $('dpgfCard').classList.remove('hidden');
 
   $('dpgfTypeSel').value = PREFS.dpgfTypeFilter || 'tous';
+  // Sélecteur de feuille
+  const sheets = dpgfSheetNames();
+  if (!sheets.includes(dpgfSheetFilter)) dpgfSheetFilter = '';
+  $('dpgfSheetSel').innerHTML =
+    `<option value="">📑 Toutes les feuilles (${DPGF.length})</option>` +
+    sheets.map(sh => {
+      const n = DPGF.filter(r => (r.sheet || '(sans nom)') === sh).length;
+      return `<option value="${esc(sh)}" ${sh === dpgfSheetFilter ? 'selected' : ''}>${esc(sh)} (${n})</option>`;
+    }).join('');
+
   const reps = [...new Set(dpgfPool().map(r=> r.repere))].sort();
   const datalist = `<datalist id="repDatalist">${reps.map(r=>`<option value="${esc(r)}">`).join('')}</datalist>`;
+
+  // Lignes visibles (filtre feuille), index d'origine conservé
+  const visible = [];
+  DPGF.forEach((r, i) => {
+    if (!dpgfSheetFilter || (r.sheet || '(sans nom)') === dpgfSheetFilter) visible.push({ r, i });
+  });
 
   const limit = dpgfRenderLimit;
   let rendered = 0;
@@ -2653,12 +2696,14 @@ function renderDPGF(){
 
   if (dpgfView === 'continue'){
     html += DPGF_HDR;
-    for (let i = 0; i < DPGF.length && rendered < limit; i++, rendered++) {
-      html += buildDpgfRow(DPGF[i], i);
+    for (const {r, i} of visible) {
+      if (rendered >= limit) break;
+      html += buildDpgfRow(r, i);
+      rendered++;
     }
   } else {
     const groups = {};
-    DPGF.forEach((r,i)=>{
+    visible.forEach(({r, i})=>{
       const k = r.sheet || '(sans nom)';
       (groups[k] = groups[k] || []).push({r, i});
     });
@@ -2680,9 +2725,9 @@ function renderDPGF(){
     }
   }
 
-  if (rendered < DPGF.length) {
+  if (rendered < visible.length) {
     html += `<div style="text-align:center;padding:12px">
-      <button class="btn btn-gris" onclick="dpgfRenderLimit+=1000;renderDPGF()">⬇ Afficher 1000 lignes de plus (${DPGF.length - rendered} restantes)</button>
+      <button class="btn btn-gris" onclick="dpgfRenderLimit+=1000;renderDPGF()">⬇ Afficher 1000 lignes de plus (${visible.length - rendered} restantes)</button>
       <button class="btn btn-gris" onclick="dpgfRenderLimit=Infinity;renderDPGF()">Tout afficher</button>
     </div>`;
   }
@@ -4298,7 +4343,8 @@ async function loadDPGF() {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = ev => {
-        const wb = XLSX.read(ev.target.result, {type:'array'});
+        const wb = XLSX.read(ev.target.result, {type:'array', cellStyles:true, bookVBA:true});
+        dpgfSrcName = file.name;
         processDPGFwb(wb);
       };
       reader.readAsArrayBuffer(file);
@@ -4309,7 +4355,9 @@ async function loadDPGF() {
   const f = await window.electronAPI.openFile([{name:'Excel', extensions:['xlsx','xlsm']}]);
   if (!f) return;
   try {
-    const wb = XLSX.read(f.data, {type:'base64'});
+    // ★ v2.7.2 : cellStyles/bookVBA pour ré-exporter dans la mise en forme d'origine
+    const wb = XLSX.read(f.data, {type:'base64', cellStyles:true, bookVBA:true});
+    dpgfSrcName = f.path.split(/[\\\/]/).pop();
     processDPGFwb(wb);
   } catch (e) {
     toast('Erreur lecture : ' + e.message, 'rouge', 4000);
@@ -4466,6 +4514,8 @@ function confirmSheets() {
 function importDPGFSheets() {
   DPGF = [];
   dpgfRenderLimit = DPGF_PAGE_SIZE;
+  dpgfSheetCols = {};
+  dpgfSheetFilter = '';
   let totalSheets = 0, nbForced = 0;
 
   detectedSheets.filter(s => s.checked).forEach(s => {
@@ -4502,6 +4552,7 @@ function importDPGFSheets() {
       }
     }
     if (headerRow < 0 || !cols || cols.descStart < 0) return;
+    dpgfSheetCols[s.name] = cols; // ★ v2.7.2 : mémorisé pour l'export à l'identique
 
     const rows = XLSX.utils.sheet_to_json(s.ws, {header:1, defval:''});
 
@@ -4564,7 +4615,7 @@ function importDPGFSheets() {
       //  vierge à chiffrer donnait donc 0 ligne)
       if (repereVal && titreVal && hasData) {
         DPGF.push({
-          sheet: s.name,
+          sheet: s.name, srcRow: i,
           repDPGF: repereVal,
           descriptif: titreVal + (detailVal ? ' - ' + detailVal : ''),
           unite: uniteVal,
@@ -4597,7 +4648,7 @@ function importDPGFSheets() {
       // CAS C : Ligne SANS repère mais avec un DÉTAIL + des données → sous-item du parent courant
       if (!repereVal && detailVal && hasData && currentParent) {
         DPGF.push({
-          sheet: s.name,
+          sheet: s.name, srcRow: i,
           repDPGF: currentParent.repere,
           descriptif: `${currentParent.titre} - ${detailVal}`,
           unite: uniteVal,
@@ -4613,7 +4664,7 @@ function importDPGFSheets() {
       //  jamais avoir de parent → 0 ligne. On importe maintenant sans parent.)
       if (!repereVal && titreVal && hasData) {
         DPGF.push({
-          sheet: s.name,
+          sheet: s.name, srcRow: i,
           repDPGF: currentParent ? currentParent.repere : '',
           descriptif: currentParent
             ? `${currentParent.titre} - ${titreVal}${detailVal ? ' ' + detailVal : ''}`
@@ -4646,8 +4697,61 @@ function importDPGFSheets() {
   }
 }
 
+/* ★ v2.7.2 — Export DPGF dans le CLASSEUR D'ORIGINE : mêmes feuilles, mêmes
+   styles, fusions et formules — la SEULE modification est l'écriture des prix
+   unitaires dans la colonne PU des lignes chiffrées. */
 async function exportDPGF() {
   if (!DPGF.length) { toast('Aucune DPGF', 'rouge'); return; }
+
+  if (pendingDPGFwb && DPGF.some(r => r.srcRow !== undefined)) {
+    let nb = 0;
+    const skippedSheets = new Set();
+    DPGF.forEach(r => {
+      if (!(r.prix > 0) || r.srcRow === undefined) return;
+      const cols = dpgfSheetCols[r.sheet];
+      const ws = pendingDPGFwb.Sheets[r.sheet];
+      if (!ws || !cols || cols.prix < 0) { skippedSheets.add(r.sheet); return; }
+      const addr = XLSX.utils.encode_cell({ r: r.srcRow, c: cols.prix });
+      const cell = ws[addr] || {};
+      delete cell.f; delete cell.w; // remplace une éventuelle formule/valeur affichée
+      cell.t = 'n';
+      cell.v = Math.round(r.prix * 100) / 100;
+      ws[addr] = cell;
+      // Étendre la plage de la feuille si besoin
+      try {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        if (r.srcRow > range.e.r) range.e.r = r.srcRow;
+        if (cols.prix > range.e.c) range.e.c = cols.prix;
+        ws['!ref'] = XLSX.utils.encode_range(range);
+      } catch (e) {}
+      nb++;
+    });
+    if (nb === 0) { toast('Aucune ligne chiffrée à écrire', 'orange'); return; }
+
+    const isXlsm = /\.xlsm$/i.test(dpgfSrcName);
+    const out = XLSX.write(pendingDPGFwb, { bookType: isXlsm ? 'xlsm' : 'xlsx', type: 'base64', cellStyles: true });
+    const base = (dpgfSrcName || 'DPGF').replace(/\.(xlsx|xlsm)$/i, '');
+    const fname = `${base}_CHIFFREE.${isXlsm ? 'xlsm' : 'xlsx'}`;
+    if (isElectron) {
+      const p = await window.electronAPI.saveFile({ defaultName: fname,
+        filters: [{ name: 'Excel', extensions: [isXlsm ? 'xlsm' : 'xlsx'] }], data: out });
+      if (p) toast(`✅ ${nb} prix écrits dans le classeur d'origine : ${p.split(/[\\\/]/).pop()}`, 'vert', 4500);
+    } else {
+      toast('Export à l\'identique disponible uniquement dans l\'app Electron', 'orange');
+    }
+    if (skippedSheets.size) {
+      toast(`⚠️ Feuille(s) sans colonne prix détectée, non remplies : ${[...skippedSheets].join(', ')}`, 'orange', 6000);
+    }
+    return;
+  }
+
+  // Repli (classeur d'origine plus en mémoire, ex. après redémarrage) :
+  // export tableau récapitulatif + invitation à recharger le fichier
+  toast('ℹ️ Classeur d\'origine non disponible (rechargez la DPGF pour un export à l\'identique) — export récapitulatif', 'bleu', 5000);
+  await exportDPGFTableau();
+}
+
+async function exportDPGFTableau() {
   const wb = XLSX.utils.book_new();
   const data = [
     ['DPGF complétée'], [`Date : ${new Date().toLocaleDateString('fr-FR')}`], [],
@@ -5313,6 +5417,7 @@ function setupDragDrop() {
       const what = confirm(`Fichier détecté : ${file.name}\n\nOK pour LIER comme base de prix\nAnnuler pour importer comme DPGF`);
       const reader = new FileReader();
       reader.onload = async ev => {
+        dpgfSrcName = file.name;
         if (what) {
           // Lier (charger en mémoire et déclencher le flux de lien)
           const arr = new Uint8Array(ev.target.result);
@@ -5326,7 +5431,7 @@ function setupDragDrop() {
             toast('Pour lier, cliquez sur le bouton « Lier fichier Excel »', 'orange', 4000);
           }
         } else {
-          const wb = XLSX.read(ev.target.result, {type:'array'});
+          const wb = XLSX.read(ev.target.result, {type:'array', cellStyles:true, bookVBA:true});
           processDPGFwb(wb);
         }
       };

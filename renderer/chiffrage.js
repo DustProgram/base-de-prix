@@ -10,9 +10,11 @@
 
 const CH_BATCH_SIZE = 30;     // lignes DPGF par appel API
 const CH_CANDIDATES = 8;      // candidats de la base par ligne
+const CH_CONCURRENCY = 3;     // ★ v2.7.2 : lots envoyés en parallèle (÷3 le temps total)
 let chRunning = false;
 let chCancelled = false;
 let CH_REPORT = null;         // dernier rapport { date, provider, lignes:[], cout, resume }
+let chSheetsChecked = new Set(); // ★ v2.7.2 : feuilles/lots sélectionnés pour le chiffrage
 
 /* ── Candidats : regroupe la base par repère puis prend les plus proches ── */
 function chBuildDigest() {
@@ -75,7 +77,32 @@ function openChiffrageIA() {
   $('chiffrageProgress').style.display = 'none';
   $('btnChiffGo').disabled = false;
   $('btnChiffGo').textContent = '⚡ Lancer le chiffrage';
+  chRenderSheets();
   openModal('modalChiffrage');
+}
+
+/* ★ v2.7.2 — choix des feuilles/lots à chiffrer (pré-sélection : la feuille
+   affichée si un filtre est actif, sinon toutes) */
+function chRenderSheets() {
+  const sheets = dpgfSheetNames();
+  chSheetsChecked = new Set(dpgfSheetFilter ? [dpgfSheetFilter] : sheets);
+  $('chiffSheets').innerHTML = sheets.map(sh => {
+    const vides = DPGF.filter(r => (r.sheet || '(sans nom)') === sh && !(r.prix > 0)).length;
+    const total = DPGF.filter(r => (r.sheet || '(sans nom)') === sh).length;
+    return `<label style="display:flex;gap:6px;align-items:center;padding:4px 8px;border-bottom:1px dotted var(--bord);font-size:11px;cursor:pointer">
+      <input type="checkbox" ${chSheetsChecked.has(sh) ? 'checked' : ''}
+        onchange="chToggleSheet('${esc(sh).replace(/'/g, "\\'")}', this.checked)">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sh)}</span>
+      <span style="color:#888;font-size:9px;white-space:nowrap">${vides}/${total} sans prix</span>
+    </label>`;
+  }).join('');
+}
+function chToggleSheet(sh, on) {
+  if (on) chSheetsChecked.add(sh); else chSheetsChecked.delete(sh);
+}
+function chSheetsAll(on) {
+  chSheetsChecked = on ? new Set(dpgfSheetNames()) : new Set();
+  $('chiffSheets').querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = on; });
 }
 
 function cancelChiffrage() {
@@ -95,8 +122,10 @@ async function startChiffrage() {
     return;
   }
   const scope = document.querySelector('input[name="chiffScope"]:checked').value;
+  if (!chSheetsChecked.size) { toast('Cochez au moins une feuille/lot', 'orange'); return; }
   const targets = [];
   DPGF.forEach((r, i) => {
+    if (!chSheetsChecked.has(r.sheet || '(sans nom)')) return;
     if (scope === 'toutes' || !(r.prix > 0)) targets.push(i);
   });
   if (!targets.length) { toast('Aucune ligne à chiffrer dans cette portée', 'orange'); return; }
@@ -113,58 +142,67 @@ async function startChiffrage() {
   const report = { date: new Date().toLocaleString('fr-FR'), provider: IA_PROVIDERS[provider].label, lignes: [], cout: 0, erreurs: [] };
   let done = 0;
   let lastErrMsg = null;
+  let cursor = 0;
 
-  for (let b = 0; b < targets.length; b += CH_BATCH_SIZE) {
-    if (chCancelled) break;
-    const batchIdx = targets.slice(b, b + CH_BATCH_SIZE);
-    const lignes = batchIdx.map(i => ({
-      index: i,
-      descriptif: String(DPGF[i].descriptif || '').slice(0, 220),
-      unite: DPGF[i].unite || '',
-      qte: DPGF[i].qte || 0,
-      candidats: chCandidatesFor(DPGF[i].descriptif, digest)
-    }));
+  // ★ v2.7.2 — lots envoyés en parallèle (CH_CONCURRENCY à la fois) : le temps
+  // total est divisé d'autant sur les grosses DPGF
+  async function chWorker() {
+    while (!chCancelled) {
+      const start = cursor;
+      cursor += CH_BATCH_SIZE;
+      const batchIdx = targets.slice(start, start + CH_BATCH_SIZE);
+      if (!batchIdx.length) return;
 
-    const res = await window.electronAPI.iaChiffrage({ provider, model: iaModel(provider), lignes, projet });
-    if (!res || !res.ok) {
-      const errMsg = (res && res.error) || 'Erreur inconnue';
-      report.erreurs.push(errMsg);
-      // Erreur de quota/clé : inutile d'enchaîner les lots
-      if (/clé|limite de débit/i.test(errMsg)) { toast('❌ ' + errMsg, 'rouge', 5000); break; }
-      // ★ v2.7.1 — même erreur deux lots de suite (modèle indisponible, etc.) :
-      // on arrête au lieu d'empiler 100+ erreurs identiques
-      if (errMsg === lastErrMsg) {
-        report.erreurs.push('⛔ Arrêt du chiffrage : erreur identique sur deux lots consécutifs.');
-        toast('❌ ' + errMsg, 'rouge', 6000);
-        break;
-      }
-      lastErrMsg = errMsg;
-    } else {
-      lastErrMsg = null;
-      iaNoteModel(res, provider);
-      report.cout += res.costUSD || 0;
-      for (const l of res.data.lignes || []) {
-        const i = l.index;
-        if (!DPGF[i]) continue;
-        if (l.prix !== null && l.prix > 0 && l.methode !== 'non_chiffrable') {
-          DPGF[i].prix = Math.round(l.prix * 100) / 100;
-          DPGF[i].total = DPGF[i].prix * (DPGF[i].qte || 1);
-          DPGF[i].mode = 'exact';
-          DPGF[i].ia = { methode: l.methode, hypothese: l.hypothese, repere: l.repere_source, confiance: l.confiance };
-          if (l.repere_source && !DPGF[i].repere) DPGF[i].repere = l.repere_source.split(',')[0].trim();
+      const lignes = batchIdx.map(i => ({
+        index: i,
+        descriptif: String(DPGF[i].descriptif || '').slice(0, 220),
+        unite: DPGF[i].unite || '',
+        qte: DPGF[i].qte || 0,
+        candidats: chCandidatesFor(DPGF[i].descriptif, digest)
+      }));
+
+      const res = await window.electronAPI.iaChiffrage({ provider, model: iaModel(provider), lignes, projet });
+      if (!res || !res.ok) {
+        const errMsg = (res && res.error) || 'Erreur inconnue';
+        report.erreurs.push(errMsg);
+        // Erreur de quota/clé : inutile d'enchaîner les lots
+        if (/clé|limite de débit/i.test(errMsg)) { chCancelled = true; toast('❌ ' + errMsg, 'rouge', 5000); return; }
+        // ★ v2.7.1 — même erreur deux lots de suite : arrêt propre
+        if (errMsg === lastErrMsg) {
+          report.erreurs.push('⛔ Arrêt du chiffrage : erreur identique sur deux lots consécutifs.');
+          chCancelled = true;
+          toast('❌ ' + errMsg, 'rouge', 6000);
+          return;
         }
-        report.lignes.push({
-          descriptif: DPGF[i].descriptif, unite: DPGF[i].unite, qte: DPGF[i].qte,
-          prix: (l.prix !== null && l.methode !== 'non_chiffrable') ? l.prix : null,
-          methode: l.methode, repere: l.repere_source, hypothese: l.hypothese, confiance: l.confiance
-        });
+        lastErrMsg = errMsg;
+      } else {
+        lastErrMsg = null;
+        iaNoteModel(res, provider);
+        report.cout += res.costUSD || 0;
+        for (const l of res.data.lignes || []) {
+          const i = l.index;
+          if (!DPGF[i]) continue;
+          if (l.prix !== null && l.prix > 0 && l.methode !== 'non_chiffrable') {
+            DPGF[i].prix = Math.round(l.prix * 100) / 100;
+            DPGF[i].total = DPGF[i].prix * (DPGF[i].qte || 1);
+            DPGF[i].mode = 'exact';
+            DPGF[i].ia = { methode: l.methode, hypothese: l.hypothese, repere: l.repere_source, confiance: l.confiance };
+            if (l.repere_source && !DPGF[i].repere) DPGF[i].repere = l.repere_source.split(',')[0].trim();
+          }
+          report.lignes.push({
+            descriptif: DPGF[i].descriptif, unite: DPGF[i].unite, qte: DPGF[i].qte,
+            prix: (l.prix !== null && l.methode !== 'non_chiffrable') ? l.prix : null,
+            methode: l.methode, repere: l.repere_source, hypothese: l.hypothese, confiance: l.confiance
+          });
+        }
       }
+      done += batchIdx.length;
+      const pct = Math.round(done / targets.length * 100);
+      $('chiffrageProgTxt').textContent = `${done} / ${targets.length} lignes traitées · ${CH_CONCURRENCY} lots en parallèle · coût ~$${report.cout.toFixed(2)}`;
+      $('chiffrageProgBar').style.width = pct + '%';
     }
-    done += batchIdx.length;
-    const pct = Math.round(done / targets.length * 100);
-    $('chiffrageProgTxt').textContent = `${done} / ${targets.length} lignes traitées · coût ~$${report.cout.toFixed(2)}`;
-    $('chiffrageProgBar').style.width = pct + '%';
   }
+  await Promise.all(Array.from({ length: CH_CONCURRENCY }, () => chWorker()));
 
   chRunning = false;
   CH_REPORT = report;
